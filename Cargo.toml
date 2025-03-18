@@ -1,0 +1,65 @@
+[package]
+name = "kagi_macros"
+version = "0.1.0"
+edition = "2021"
+description = "Procedural macros for the Kagi Node system"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+proc-macro = true
+
+[features]
+default = ["node_implementation"]
+node_implementation = ["kagi_node", "tokio"]
+distributed_slice = ["node_implementation", "dep:linkme"]
+
+[dependencies]
+syn = { version = "2.0", features = ["full", "extra-traits"] }
+quote = "1.0"
+darling = "0.20"
+rand = "0.8"
+proc-macro2 = "1.0"
+serde_json = "1.0"
+async-trait = "0.1"
+kagi_common = { path = "../common" }
+inventory = "0.3"
+
+# Optional dependencies
+kagi_node = { path = "../node", optional = true }
+linkme = { version = "0.3", optional = true }
+anyhow = "1.0"
+
+[dev-dependencies]
+anyhow = "1.0"
+serde_json = "1.0"
+chrono = "0.4"
+tempfile = "3.8"
+tokio = { version = "1.32", features = ["full"] }
+
+# Main end-to-end test that covers all macros
+[[test]]
+name = "end_to_end_test"
+path = "tests/end_to_end_test.rs"
+required-features = ["node_implementation"]
+
+# Basic service macro test (no node requirements)
+[[test]]
+name = "test_service_only"
+path = "tests/test_service_only.rs"
+
+# Binary for macro expansion debugging
+[[bin]]
+name = "macro_debug"
+path = "src/bin/macro_debug.rs"
+required-features = ["node_implementation"]
+
+[dependencies.tokio]
+version = "1.32"
+features = ["full"]
+optional = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+anyhow = "1.0"
+serde_json = "1.0"
+tokio = { version = "1.32", features = ["full"] } 
