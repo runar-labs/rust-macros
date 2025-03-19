@@ -230,60 +230,60 @@ pub fn is_service_response_type(ty: &syn::Type) -> bool {
     false
 }
 
-/// Extract a parameter from a ValueType
-/// This is used by the action macro to extract parameters from requests
-/// 
-/// Supports both direct values and mapped parameters as specified in guidelines.md:
-/// - Single parameter actions can be called with direct values: `node.request("service/action", "value")`
-/// - All actions can be called with mapped parameters: `node.request("service/action", vmap!{"param" => value})`
+/// Helper function to extract value from a parameter map
 pub fn extract_parameter<T, S>(
-    params: &kagi_node::services::ValueType,
+    params: &runar_node::ValueType,
     name: S,
     error_msg: &str
 ) -> anyhow::Result<T>
 where
     S: AsRef<str>,
-    T: TryFrom<kagi_node::services::ValueType>,
+    T: TryFrom<runar_node::ValueType> + Default,
     T::Error: std::fmt::Debug,
 {
     let name_ref = name.as_ref();
-    
     match params {
         // If params is a Map, try to get the parameter by name
-        kagi_node::services::ValueType::Map(map) => {
+        runar_node::ValueType::Map(map) => {
             // Look for the parameter in the map
             if let Some(value) = map.get(name_ref) {
-                // Try to convert the value to the desired type
-                T::try_from(value.clone())
-                    .map_err(|e| anyhow::anyhow!("Failed to convert parameter '{}': {:?}", name_ref, e))
-            } else {
-                // Parameter not found in map
-                Err(anyhow::anyhow!("{}", error_msg))
+                // Try to convert the value to the requested type
+                match T::try_from(value.clone()) {
+                    Ok(val) => return Ok(val),
+                    Err(e) => {
+                        if !error_msg.is_empty() {
+                            return Err(anyhow::anyhow!("{}: {:?}", error_msg, e));
+                        }
+                    }
+                }
             }
-        },
-        // If params is a direct value (not a map), try to use it directly
-        // This supports the direct parameter style from guidelines.md:
-        // node.request("service/action", "value")
-        _ => {
-            // Try to convert the value to the desired type
-            T::try_from(params.clone())
-                .map_err(|e| anyhow::anyhow!("Failed to convert parameter '{}': {:?}", name_ref, e))
         }
+        _ => {}
     }
-}
 
-/// Stub implementation for when node_implementation feature is disabled
-#[cfg(not(feature = "node_implementation"))]
-pub fn extract_parameter<T, S>(
-    _params: &str, 
-    _name: S,
-    error_msg: &str
-) -> anyhow::Result<T>
-where
-    S: AsRef<str>,
-    T: Default,
-{
-    // This is just a stub that will never be called in compile time
     // Return a default value for T in this case
     Ok(T::default())
+}
+
+/// Helper function to extract a specific value from a parameter map
+pub fn extract_param<T>(
+    params: &runar_node::ValueType,
+    name: &str,
+) -> anyhow::Result<T>
+where
+    T: TryFrom<runar_node::ValueType>,
+    <T as TryFrom<runar_node::ValueType>>::Error: std::fmt::Display,
+{
+    match params {
+        runar_node::ValueType::Map(map) => {
+            if let Some(value) = map.get(name) {
+                T::try_from(value.clone()).map_err(|err| {
+                    anyhow::anyhow!("Failed to convert parameter '{}': {}", name, err)
+                })
+            } else {
+                Err(anyhow::anyhow!("Parameter '{}' not found", name))
+            }
+        }
+        _ => Err(anyhow::anyhow!("Parameters are not a map")),
+    }
 } 

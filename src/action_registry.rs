@@ -2,40 +2,40 @@ use std::future::Future;
 use std::pin::Pin;
 use anyhow::Result;
 
-/// Handler function type for action handlers
-pub type ActionHandlerFn = fn(
+/// Function signature for an action handler
+pub type ActionFn = fn(
     service: &dyn std::any::Any,
-    context: &kagi_node::services::RequestContext,
-    params: kagi_node::services::ValueType,
-) -> Pin<Box<dyn Future<Output = Result<kagi_node::services::ServiceResponse>> + Send>>;
+    context: &runar_node::services::RequestContext,
+    path: &str,
+    params: runar_node::ValueType,
+) -> Pin<Box<dyn Future<Output = Result<runar_node::services::ServiceResponse>> + Send>>;
 
 /// Represents an action handler registered by the action macro
-pub struct ActionHandler {
-    /// Name of the method that handles this action
-    pub method_name: &'static str,
-    
-    /// Operation name for Node API requests
-    pub operation_name: &'static str,
-    
+#[derive(Debug)]
+pub struct ActionItem {
+    /// Name of the action
+    pub name: String,
+    /// Service type ID for this action
+    pub service_type_id: std::any::TypeId,
     /// Function to handle this action
-    pub handler_fn: ActionHandlerFn,
+    pub handler_fn: ActionFn,
 }
 
 // Use inventory crate to collect action handlers
-inventory::collect!(ActionHandler);
+inventory::collect!(ActionItem);
 
 /// Provides access to all registered action handlers
-pub fn get_action_handlers() -> Vec<&'static ActionHandler> {
-    inventory::iter::<ActionHandler>
+pub fn get_action_handlers() -> Vec<&'static ActionItem> {
+    inventory::iter::<ActionItem>
         .into_iter()
         .collect()
 }
 
 /// Find an action handler by operation name
-pub fn find_action_handler(operation_name: &str) -> Option<&'static ActionHandler> {
+pub fn find_action_handler(operation_name: &str) -> Option<&'static ActionItem> {
     get_action_handlers()
         .into_iter()
-        .find(|handler| handler.operation_name == operation_name)
+        .find(|handler| handler.name == operation_name)
 }
 
 /// Dispatch a request to the appropriate action handler
@@ -55,10 +55,10 @@ pub fn find_action_handler(operation_name: &str) -> Option<&'static ActionHandle
 /// A `ServiceResponse` with the result of the operation
 pub async fn dispatch_request<S>(
     service: &S,
-    context: &kagi_node::services::RequestContext,
+    context: &runar_node::services::RequestContext,
     operation: &str,
-    params: kagi_node::services::ValueType,
-) -> Result<kagi_node::services::ServiceResponse>
+    params: runar_node::ValueType,
+) -> Result<runar_node::services::ServiceResponse>
 where
     S: std::any::Any + 'static,
 {
@@ -67,7 +67,18 @@ where
         .ok_or_else(|| anyhow::anyhow!("Unknown operation: {}", operation))?;
     
     // Call the handler function directly with the service, context, and params
-    (handler.handler_fn)(service, context, params).await.map_err(|e| {
+    (handler.handler_fn)(service, context, operation, params).await.map_err(|e| {
         anyhow::anyhow!("Error handling operation '{}': {}", operation, e)
     })
+}
+
+/// Interface for action handler implementation
+pub trait ActionHandlerFn<S> {
+    async fn call(
+        &self,
+        service: &S,
+        context: &runar_node::services::RequestContext,
+        path: &str,
+        params: runar_node::ValueType,
+    ) -> Result<runar_node::services::ServiceResponse>;
 } 

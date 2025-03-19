@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use anyhow::Result;
+use std::any::TypeId;
 
 /// Represents a subscription handler registered by the subscribe macro
 pub struct SubscriptionHandler {
@@ -14,7 +15,7 @@ pub struct SubscriptionHandler {
     pub is_full_path: bool,
     
     /// Function to register this subscription
-    pub register_fn: fn(&dyn std::any::Any, &kagi_node::services::RequestContext) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>,
+    pub register_fn: fn(&dyn std::any::Any, &runar_node::services::RequestContext) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>,
 }
 
 // Use inventory crate to collect subscription handlers
@@ -27,22 +28,23 @@ pub fn get_subscription_handlers() -> Vec<&'static SubscriptionHandler> {
         .collect()
 }
 
-/// Helper to register all subscriptions for a service
-/// 
-/// This function is called during service initialization to register
-/// all subscription handlers defined with the subscribe macro.
-/// 
-/// # Parameters
-/// 
-/// - `service`: The service instance to register subscriptions for
-/// - `ctx`: The request context for subscription registration
-/// 
-/// # Returns
-/// 
-/// `Ok(())` if all subscriptions were registered successfully, or an error
-pub async fn register_all_subscriptions<S>(service: &S, ctx: &kagi_node::services::RequestContext) -> Result<()>
+/// A registry item for a subscription
+#[derive(Debug)]
+pub struct SubscriptionItem {
+    /// Topic name that this handler subscribes to
+    pub topic: String,
+    
+    /// Type ID of the service that handles this subscription
+    pub service_type_id: TypeId,
+    
+    /// Function to register this subscription
+    pub register_fn: fn(&dyn std::any::Any, &runar_node::services::RequestContext) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>,
+}
+
+/// Register all subscriptions from the Subscription Registry for a service
+pub async fn register_all_subscriptions<S>(service: &S, ctx: &runar_node::services::RequestContext) -> Result<()>
 where
-    S: Clone + std::any::Any + 'static,
+    S: 'static,
 {
     let mut errors = Vec::new();
     
