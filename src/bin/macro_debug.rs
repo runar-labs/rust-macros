@@ -1,12 +1,17 @@
+// This file is temporarily disabled during migration from kagi to runar
+// It needs to be updated to use the new crate names and structures
+// Development tool for debugging macros only - not part of production build
+
+/* 
 // This file is for debugging macro expansion
 // See the generated code by running:
-// cargo rustc --features=node_implementation -p kagi_macros --bin macro_debug -- -Z unstable-options --pretty=expanded
+// cargo rustc --features=node_implementation -p runar_macros --bin macro_debug -- -Z unstable-options --pretty=expanded
 
 use std::sync::Arc;
-use kagi_macros::{action, subscribe};
-use kagi_node::services::{RequestContext, ServiceResponse, ValueType, ServiceState, ServiceMetadata, ServiceRequest};
+use runar_macros::{action, subscribe};
+use runar_node::services::{RequestContext, ServiceResponse, ValueType, ServiceState, ServiceMetadata, ServiceRequest};
 use anyhow::Result;
-use kagi_node::services::AbstractService;
+use runar_node::services::abstract_service::AbstractService;
 use async_trait::async_trait;
 
 // Define the ServiceInfo trait for testing
@@ -104,4 +109,10 @@ impl AbstractService for DebugService {
 
 fn main() {
     println!("Macro debug binary - for testing macro expansion");
+}
+*/
+
+// Empty main function to satisfy the compiler
+fn main() {
+    println!("Macro debug binary is currently disabled during migration");
 } 
