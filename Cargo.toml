@@ -1,8 +1,9 @@
 [package]
-name = "kagi_macros"
+name = "runar_macros"
 version = "0.1.0"
 edition = "2021"
-description = "Procedural macros for the Kagi Node system"
+description = "Procedural macros for the Runar Node system"
+authors = ["Runar Team"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -11,7 +12,7 @@ proc-macro = true
 
 [features]
 default = ["node_implementation"]
-node_implementation = ["kagi_node", "tokio"]
+node_implementation = ["runar_node", "tokio"]
 distributed_slice = ["node_implementation", "dep:linkme"]
 
 [dependencies]
@@ -22,11 +23,11 @@ rand = "0.8"
 proc-macro2 = "1.0"
 serde_json = "1.0"
 async-trait = "0.1"
-kagi_common = { path = "../common" }
+runar_common = { path = "../rust-common" }
 inventory = "0.3"
 
 # Optional dependencies
-kagi_node = { path = "../node", optional = true }
+runar_node = { path = "../rust-node", optional = true }
 linkme = { version = "0.3", optional = true }
 anyhow = "1.0"
 
