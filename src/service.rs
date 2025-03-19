@@ -6,10 +6,10 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, ItemStruct, parse::Parser, Meta};
 
-/// Service macro for defining KAGI services
+/// Service macro for defining Runar services
 ///
 /// This macro generates all the necessary implementations for a service to work
-/// with the KAGI node system. It handles:
+/// with the Runar node system. It handles:
 /// - Service metadata (name, path, description, version)
 /// - AbstractService trait implementation for Node integration
 /// - Request handling and dispatching to action methods
@@ -81,9 +81,17 @@ pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
     
     // Extract service attributes
     let service_name = attrs.get("name").cloned().unwrap_or_else(|| default_name.clone());
-    let service_path = attrs.get("path").cloned().unwrap_or_else(|| service_name.clone());
+    
+    // Normalize the path - ensure it starts with a slash
+    let raw_path = attrs.get("path").cloned().unwrap_or_else(|| service_name.clone());
+    let service_path = if raw_path.starts_with('/') {
+        raw_path
+    } else {
+        format!("/{}", raw_path)
+    };
+    
     let service_desc = attrs.get("description").cloned()
-        .unwrap_or_else(|| format!("{} service", service_name));
+        .unwrap_or_else(|| format!("Service {}", struct_name_str));
     let service_version = attrs.get("version").cloned().unwrap_or_else(|| "0.1.0".to_string());
     
     // Generate the implementation
@@ -93,7 +101,7 @@ pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
         
         // Implement AbstractService trait
         #[async_trait::async_trait]
-        impl kagi_node::services::AbstractService for #struct_name {
+        impl runar_node::services::AbstractService for #struct_name {
             // Service metadata
             fn name(&self) -> &str {
                 #service_name
@@ -111,8 +119,16 @@ pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
                 #service_version
             }
             
+            fn state(&self) -> runar_node::services::ServiceState {
+                runar_node::services::ServiceState::Initialized
+            }
+            
+            fn metadata(&self) -> runar_node::services::ServiceMetadata {
+                runar_node::services::ServiceMetadata::new()
+            }
+            
             // Service initialization - sets up event subscriptions
-            async fn init(&mut self, context: &kagi_node::services::RequestContext) -> anyhow::Result<()> {
+            async fn init(&mut self, context: &runar_node::services::RequestContext) -> anyhow::Result<()> {
                 // Register all event subscriptions
                 self.setup_subscriptions(context).await?;
                 Ok(())
@@ -131,30 +147,65 @@ pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
             // Handle requests from the Node API
             async fn handle_request(
                 &self,
-                request: kagi_node::services::ServiceRequest,
-            ) -> anyhow::Result<kagi_node::services::ServiceResponse> {
+                request: runar_node::services::ServiceRequest,
+            ) -> anyhow::Result<runar_node::services::ServiceResponse> {
                 // Extract operation and parameters
                 let operation = &request.operation;
-                let params = request.params.unwrap_or(kagi_node::services::ValueType::Null);
+                let params = request.params.unwrap_or(runar_common::types::ValueType::Null);
+                let context = &request.context;
                 
                 // Use the action registry to dispatch to the correct handler
-                crate::action_registry::dispatch_request(
-                    self,
-                    &request.context,
-                    operation,
-                    params,
-                ).await.map_err(|e| {
-                    // Add more context to errors
-                    anyhow::anyhow!("Error in {}.{}: {}", #service_name, operation, e)
-                })
+                let service_ref: &dyn std::any::Any = self;
+                let handlers = crate::action_registry::get_action_handlers();
+                let type_id = std::any::TypeId::of::<#struct_name>();
+                
+                // Find a handler for this operation
+                for handler in handlers {
+                    if handler.service_type_id == type_id && handler.name == operation {
+                        // Found a matching handler - call it
+                        return (handler.handler_fn)(service_ref, context, operation, params).await
+                            .map_err(|e| anyhow::anyhow!("Error in {}.{}: {}", #service_name, operation, e));
+                    }
+                }
+                
+                // No handler found, return error
+                Err(anyhow::anyhow!("Unknown operation: {}.{}", #service_name, operation))
             }
         }
         
         // Add subscription setup method
         impl #struct_name {
-            async fn setup_subscriptions(&self, context: &kagi_node::services::RequestContext) -> anyhow::Result<()> {
+            async fn setup_subscriptions(&self, context: &runar_node::services::RequestContext) -> anyhow::Result<()> {
                 // Register all event subscriptions defined with the subscribe macro
-                crate::subscription_registry::register_all_subscriptions(self, context).await
+                let handlers = crate::subscription_registry::get_subscription_handlers();
+                let service_ref: &dyn std::any::Any = self;
+                
+                // Call the registration function for each handler that matches our type
+                for handler in handlers {
+                    // Call the registration function
+                    (handler.register_fn)(service_ref, context).await?;
+                }
+                
+                Ok(())
+            }
+        }
+        
+        // Implement ServiceInfo trait for backward compatibility
+        impl runar_common::ServiceInfo for #struct_name {
+            fn service_name(&self) -> &str {
+                #service_name
+            }
+            
+            fn service_path(&self) -> &str {
+                #service_path
+            }
+            
+            fn service_description(&self) -> &str {
+                #service_desc
+            }
+            
+            fn service_version(&self) -> &str {
+                #service_version
             }
         }
     };

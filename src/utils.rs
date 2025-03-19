@@ -232,50 +232,53 @@ pub fn is_service_response_type(ty: &syn::Type) -> bool {
 
 /// Helper function to extract value from a parameter map
 pub fn extract_parameter<T, S>(
-    params: &runar_node::ValueType,
+    params: &runar_common::types::ValueType,
     name: S,
     error_msg: &str
 ) -> anyhow::Result<T>
 where
     S: AsRef<str>,
-    T: TryFrom<runar_node::ValueType> + Default,
+    T: TryFrom<runar_common::types::ValueType> + Default,
     T::Error: std::fmt::Debug,
 {
     let name_ref = name.as_ref();
     match params {
         // If params is a Map, try to get the parameter by name
-        runar_node::ValueType::Map(map) => {
+        runar_common::types::ValueType::Map(map) => {
             // Look for the parameter in the map
             if let Some(value) = map.get(name_ref) {
                 // Try to convert the value to the requested type
                 match T::try_from(value.clone()) {
-                    Ok(val) => return Ok(val),
-                    Err(e) => {
-                        if !error_msg.is_empty() {
-                            return Err(anyhow::anyhow!("{}: {:?}", error_msg, e));
-                        }
-                    }
+                    Ok(converted) => Ok(converted),
+                    Err(e) => Err(anyhow::anyhow!("Error converting parameter '{}': {:?}", name_ref, e)),
                 }
+            } else {
+                // Parameter not found
+                Err(anyhow::anyhow!("{}", error_msg))
+            }
+        },
+        // For all other types, assume this is a direct value
+        _ => {
+            // Try to convert the value to the requested type
+            match T::try_from(params.clone()) {
+                Ok(converted) => Ok(converted),
+                Err(e) => Err(anyhow::anyhow!("Error converting direct parameter: {:?}", e)),
             }
         }
-        _ => {}
     }
-
-    // Return a default value for T in this case
-    Ok(T::default())
 }
 
-/// Helper function to extract a specific value from a parameter map
+/// Alternative version of extract_parameter for use in non-macro context
 pub fn extract_param<T>(
-    params: &runar_node::ValueType,
+    params: &runar_common::types::ValueType,
     name: &str,
 ) -> anyhow::Result<T>
 where
-    T: TryFrom<runar_node::ValueType>,
-    <T as TryFrom<runar_node::ValueType>>::Error: std::fmt::Display,
+    T: TryFrom<runar_common::types::ValueType>,
+    <T as TryFrom<runar_common::types::ValueType>>::Error: std::fmt::Display,
 {
     match params {
-        runar_node::ValueType::Map(map) => {
+        runar_common::types::ValueType::Map(map) => {
             if let Some(value) = map.get(name) {
                 T::try_from(value.clone()).map_err(|err| {
                     anyhow::anyhow!("Failed to convert parameter '{}': {}", name, err)

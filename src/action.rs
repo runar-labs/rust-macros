@@ -3,7 +3,7 @@ use quote::quote;
 use syn::{parse_macro_input, ItemFn, Ident, parse::Parser, Meta};
 use proc_macro2::Span;
 
-/// Action macro for defining service operations in KAGI
+/// Action macro for defining service operations in Runar
 ///
 /// This macro marks methods as service operations that can be invoked through the Node API.
 /// It handles parameter extraction and result conversion.
@@ -99,11 +99,11 @@ pub fn action(attr: TokenStream, item: TokenStream) -> TokenStream {
                 extern crate std;
                 
                 // Register this action with the service's action registry
-                inventory::submit! {
-                    crate::action_registry::ActionHandler {
-                        method_name: #method_name_str,
-                        operation_name: #operation_name,
-                        handler_fn: |svc, context, params| {
+                ::inventory::submit! {
+                    crate::action_registry::ActionItem {
+                        name: #operation_name.to_string(),
+                        service_type_id: std::any::TypeId::of::<Self>(),
+                        handler_fn: |svc, context, _operation, params| {
                             Box::pin(async move {
                                 // Extract parameters from the request
                                 #param_extraction
@@ -114,11 +114,22 @@ pub fn action(attr: TokenStream, item: TokenStream) -> TokenStream {
                                     None => return Err(anyhow::anyhow!("Failed to downcast service to the required type"))
                                 };
                                 
-                                // Call the actual method with extracted parameters
-                                let result = concrete_svc.#method_name(context, #(#param_names),*).await?;
+                                // Call the actual method with extracted parameters and get the result
+                                let result = match concrete_svc.#method_name(context, #(#param_names),*).await {
+                                    // Success case - wrap the result in a ServiceResponse
+                                    Ok(value) => runar_node::services::ServiceResponse::success(
+                                        value,
+                                        None
+                                    ),
+                                    // Error case - create an error response
+                                    Err(e) => runar_node::services::ServiceResponse::error(
+                                        e.to_string(),
+                                        None
+                                    ),
+                                };
                                 
-                                // Wrap the result in a ServiceResponse
-                                Ok(kagi_node::services::ServiceResponse::success(result))
+                                // Return the response
+                                Ok(result)
                             })
                         }
                     }

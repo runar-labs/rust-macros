@@ -3,7 +3,7 @@ use quote::quote;
 use syn::{parse_macro_input, ItemFn, Meta, parse::Parser};
 use crate::utils::extract_name_value_pairs;
 
-/// Subscribe macro for defining event handlers in KAGI services
+/// Subscribe macro for defining event handlers in Runar services
 ///
 /// This macro marks methods as event subscription handlers and registers them with the Node's
 /// event system during service initialization.
@@ -101,7 +101,7 @@ pub fn subscribe(attr: TokenStream, item: TokenStream) -> TokenStream {
                 extern crate std;
                 
                 // Add the subscription setup code for this handler
-                inventory::submit! {
+                ::inventory::submit! {
                     crate::subscription_registry::SubscriptionHandler {
                         method_name: #method_name_str,
                         topic: #topic,

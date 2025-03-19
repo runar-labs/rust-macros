@@ -1,23 +1,24 @@
 use std::future::Future;
 use std::pin::Pin;
 use anyhow::Result;
+use runar_common::types::ValueType;
+use runar_node::services::{RequestContext, ServiceResponse};
 
-/// Function signature for an action handler
+/// Type for action handler functions
 pub type ActionFn = fn(
-    service: &dyn std::any::Any,
-    context: &runar_node::services::RequestContext,
-    path: &str,
-    params: runar_node::ValueType,
-) -> Pin<Box<dyn Future<Output = Result<runar_node::services::ServiceResponse>> + Send>>;
+    &dyn std::any::Any,
+    &RequestContext,
+    &str,
+    ValueType,
+) -> Pin<Box<dyn Future<Output = Result<ServiceResponse>> + Send>>;
 
-/// Represents an action handler registered by the action macro
-#[derive(Debug)]
+/// Item used to register an action handler
 pub struct ActionItem {
     /// Name of the action
     pub name: String,
-    /// Service type ID for this action
+    /// Service type ID for downcasting
     pub service_type_id: std::any::TypeId,
-    /// Function to handle this action
+    /// Handler function
     pub handler_fn: ActionFn,
 }
 
@@ -31,54 +32,35 @@ pub fn get_action_handlers() -> Vec<&'static ActionItem> {
         .collect()
 }
 
-/// Find an action handler by operation name
-pub fn find_action_handler(operation_name: &str) -> Option<&'static ActionItem> {
-    get_action_handlers()
-        .into_iter()
-        .find(|handler| handler.name == operation_name)
-}
-
-/// Dispatch a request to the appropriate action handler
-/// 
-/// This function is used by the service macro to handle requests.
-/// It finds the appropriate action handler by operation name and calls it.
-/// 
-/// # Parameters
-/// 
-/// - `service`: The service instance to dispatch the request to
-/// - `context`: The request context containing metadata and callbacks
-/// - `operation`: The operation name to find the handler for
-/// - `params`: The parameters for the operation (may be a direct value or a map)
-/// 
-/// # Returns
-/// 
-/// A `ServiceResponse` with the result of the operation
-pub async fn dispatch_request<S>(
-    service: &S,
-    context: &runar_node::services::RequestContext,
+/// Dispatch a request to the correct action handler
+pub async fn dispatch_request(
+    service: &dyn std::any::Any,
+    context: &RequestContext,
     operation: &str,
-    params: runar_node::ValueType,
-) -> Result<runar_node::services::ServiceResponse>
-where
-    S: std::any::Any + 'static,
-{
-    // Find the handler for this operation
-    let handler = find_action_handler(operation)
-        .ok_or_else(|| anyhow::anyhow!("Unknown operation: {}", operation))?;
+    params: ValueType,
+) -> Result<ServiceResponse> {
+    // Find a handler for this operation and service type
+    let type_id = service.type_id();
+    let handlers = get_action_handlers();
     
-    // Call the handler function directly with the service, context, and params
-    (handler.handler_fn)(service, context, operation, params).await.map_err(|e| {
-        anyhow::anyhow!("Error handling operation '{}': {}", operation, e)
-    })
+    for handler in handlers {
+        if handler.service_type_id == type_id && handler.name == operation {
+            // Found a matching handler - call it
+            return (handler.handler_fn)(service, context, operation, params).await;
+        }
+    }
+    
+    // No handler found
+    Err(anyhow::anyhow!("No handler found for operation: {}", operation))
 }
 
-/// Interface for action handler implementation
+/// Trait for action handler functions
 pub trait ActionHandlerFn<S> {
-    async fn call(
+    /// Invoke the action handler with service and parameters
+    async fn invoke(
         &self,
         service: &S,
-        context: &runar_node::services::RequestContext,
-        path: &str,
-        params: runar_node::ValueType,
-    ) -> Result<runar_node::services::ServiceResponse>;
+        ctx: &RequestContext,
+        params: ValueType,
+    ) -> Result<ServiceResponse>;
 } 

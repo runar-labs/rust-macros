@@ -19,6 +19,12 @@ impl Parse for EventInput {
     }
 }
 
+// Main function for the events macro
+pub fn events(args: TokenStream, input: TokenStream) -> TokenStream {
+    // Just forward to subscribe for now
+    subscribe(args, input)
+}
+
 pub fn subscribe(args: TokenStream, input: TokenStream) -> TokenStream {
     // Parse the topic argument from the attribute
     let topic = match syn::parse::<LitStr>(args.clone()) {
@@ -92,7 +98,7 @@ pub fn subscribe(args: TokenStream, input: TokenStream) -> TokenStream {
                     println!("Registering subscription '{}' for topic '{}' in service '{}'", 
                         #fn_name_str, #topic_str, service_name);
                     
-                    let subscription = kagi_node::services::EventSubscription {
+                    let subscription = runar_node::services::EventSubscription {
                         topic: #topic_str.to_string(),
                         handler: |payload| {
                             let this = service_instance.clone();
@@ -103,7 +109,7 @@ pub fn subscribe(args: TokenStream, input: TokenStream) -> TokenStream {
                         service: service_name.clone(),
                     };
                     
-                    if let Err(e) = kagi_node::init::register_subscription(subscription).await {
+                    if let Err(e) = runar_node::init::register_subscription(subscription).await {
                         println!("Failed to register subscription '{}' for topic '{}' in service '{}': {}", 
                             #fn_name_str, #topic_str, service_name, e);
                     }
@@ -112,7 +118,7 @@ pub fn subscribe(args: TokenStream, input: TokenStream) -> TokenStream {
             
             // Add a new method to the impl block for registering subscriptions
             let register_method = quote! {
-                #[cfg(feature = "kagi_node")]
+                #[cfg(feature = "runar_node")]
                 pub async fn #register_fn_name(service_instance: std::sync::Arc<Self>) {
                     let service_name = service_instance.name().to_string();
                     
@@ -197,13 +203,13 @@ pub fn publish(args: TokenStream, input: TokenStream) -> TokenStream {
                     println!("Registering publication '{}' for topic '{}' in service '{}'", 
                         #fn_name_str, #topic_str, service_name);
                     
-                    let publication = kagi_node::services::PublicationInfo {
+                    let publication = runar_node::services::PublicationInfo {
                         topic: #topic_str.to_string(),
                         service: service_name.clone(),
                         description: format!("Publication for topic {} in service {}", #topic_str, service_name),
                     };
                     
-                    if let Err(e) = kagi_node::init::register_publication(publication).await {
+                    if let Err(e) = runar_node::init::register_publication(publication).await {
                         println!("Failed to register publication '{}' for topic '{}' in service '{}': {}", 
                             #fn_name_str, #topic_str, service_name, e);
                     }
@@ -212,7 +218,7 @@ pub fn publish(args: TokenStream, input: TokenStream) -> TokenStream {
             
             // Add a new method to the impl block for registering publications
             let register_method = quote! {
-                #[cfg(feature = "kagi_node")]
+                #[cfg(feature = "runar_node")]
                 pub async fn #register_fn_name(service_instance: std::sync::Arc<Self>) {
                     let service_name = service_instance.name().to_string();
                     
@@ -223,8 +229,8 @@ pub fn publish(args: TokenStream, input: TokenStream) -> TokenStream {
             
             // Add a trait implementation for AbstractService that calls our registration methods
             let trait_impl = quote! {
-                #[cfg(feature = "kagi_node")]
-                impl kagi_node::services::AbstractService for #self_ty {
+                #[cfg(feature = "runar_node")]
+                impl runar_node::services::AbstractService for #self_ty {
                     fn name(&self) -> &str {
                         self.name()
                     }
@@ -241,7 +247,7 @@ pub fn publish(args: TokenStream, input: TokenStream) -> TokenStream {
                         self.version()
                     }
                     
-                    async fn initialize(&mut self) -> kagi_node::Result<()> {
+                    async fn initialize(&mut self) -> runar_node::Result<()> {
                         // Register subscriptions and publications when the service is initialized
                         let instance = std::sync::Arc::new(self.clone());
                         
@@ -256,16 +262,16 @@ pub fn publish(args: TokenStream, input: TokenStream) -> TokenStream {
                         Ok(())
                     }
                     
-                    async fn start(&mut self) -> kagi_node::Result<()> {
+                    async fn start(&mut self) -> runar_node::Result<()> {
                         Ok(())
                     }
                     
-                    async fn stop(&mut self) -> kagi_node::Result<()> {
+                    async fn stop(&mut self) -> runar_node::Result<()> {
                         Ok(())
                     }
                 }
                 
-                #[cfg(feature = "kagi_node")]
+                #[cfg(feature = "runar_node")]
                 impl #self_ty {
                     // Helper method to check if the register_subscriptions method exists
                     fn register_subscriptions_method() -> Option<()> {

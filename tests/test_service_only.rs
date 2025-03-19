@@ -23,7 +23,7 @@ fn test_service_only() {
     
     // Verify the service name and path from the macro
     assert_eq!(service.service_name(), "test_service");
-    assert_eq!(service.service_path(), "/test_service"); // Should default to "/name"
+    assert_eq!(service.service_path(), "/test_service"); // Path is prefixed with /
     
     println!("Service definition test passed!");
 }
@@ -47,7 +47,7 @@ fn test_service_minimal() {
     
     // Verify the service name and path from the macro
     assert_eq!(service.service_name(), "minimal_service");
-    assert_eq!(service.service_path(), "/minimal_service"); // Should default to "/name"
+    assert_eq!(service.service_path(), "/minimal_service"); // Path is prefixed with /
     assert_eq!(service.service_description(), "Service MinimalService"); // Default description
     assert_eq!(service.service_version(), "0.1.0"); // Default version
 }
@@ -76,7 +76,7 @@ fn test_service_with_all_params() {
     
     // Verify all service parameters
     assert_eq!(service.service_name(), "custom_service");
-    assert_eq!(service.service_path(), "/api/v1/custom"); // Custom path
+    assert_eq!(service.service_path(), "/api/v1/custom"); // Path is already prefixed with /
     assert_eq!(service.service_description(), "A fully customized service"); // Custom description
     assert_eq!(service.service_version(), "2.3.4"); // Custom version
 }

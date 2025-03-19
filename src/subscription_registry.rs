@@ -1,21 +1,22 @@
 use std::future::Future;
 use std::pin::Pin;
 use anyhow::Result;
-use std::any::TypeId;
+use async_trait::async_trait;
 
-/// Represents a subscription handler registered by the subscribe macro
+/// Handler function for a subscription
+#[derive(Debug)]
 pub struct SubscriptionHandler {
     /// Name of the method that handles this subscription
-    pub method_name: &'static str,
-    
-    /// Topic name (may be relative or absolute)
-    pub topic: &'static str,
-    
-    /// Whether the topic is a full path
+    pub method_name: String,
+    /// Topic to subscribe to
+    pub topic: String,
+    /// Whether the topic is a full path or needs to be prefixed with service path
     pub is_full_path: bool,
-    
     /// Function to register this subscription
-    pub register_fn: fn(&dyn std::any::Any, &runar_node::services::RequestContext) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>,
+    pub register_fn: fn(
+        service: &dyn std::any::Any,
+        ctx: &runar_node::services::RequestContext,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>,
 }
 
 // Use inventory crate to collect subscription handlers
@@ -28,43 +29,28 @@ pub fn get_subscription_handlers() -> Vec<&'static SubscriptionHandler> {
         .collect()
 }
 
-/// A registry item for a subscription
+/// Item used to register a subscription
 #[derive(Debug)]
 pub struct SubscriptionItem {
-    /// Topic name that this handler subscribes to
+    /// Topic to subscribe to
     pub topic: String,
-    
-    /// Type ID of the service that handles this subscription
-    pub service_type_id: TypeId,
-    
-    /// Function to register this subscription
-    pub register_fn: fn(&dyn std::any::Any, &runar_node::services::RequestContext) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>,
+    /// Service type ID
+    pub service_type_id: std::any::TypeId,
 }
 
-/// Register all subscriptions from the Subscription Registry for a service
-pub async fn register_all_subscriptions<S>(service: &S, ctx: &runar_node::services::RequestContext) -> Result<()>
+/// Register all subscriptions for a service
+pub async fn register_all_subscriptions<S>(
+    service: &S,
+    ctx: &runar_node::services::RequestContext,
+) -> Result<()>
 where
-    S: 'static,
+    S: std::any::Any + 'static,
 {
-    let mut errors = Vec::new();
-    
+    // Find all subscription handlers for this service
     for handler in get_subscription_handlers() {
-        // Call the register function directly with the service and context
-        match (handler.register_fn)(service, ctx).await {
-            Ok(_) => {}, // Subscription registered successfully
-            Err(e) => {
-                // Collect errors but continue registering other subscriptions
-                errors.push(format!("Failed to register subscription for handler '{}' on topic '{}': {}", 
-                    handler.method_name, handler.topic, e));
-            }
-        }
+        // Call the registration function for each handler
+        (handler.register_fn)(service, ctx).await?;
     }
     
-    // If there were any errors, return an error with all the failures
-    if !errors.is_empty() {
-        Err(anyhow::anyhow!("Failed to register {} subscription(s):\n{}", 
-            errors.len(), errors.join("\n")))
-    } else {
-        Ok(())
-    }
+    Ok(())
 } 
