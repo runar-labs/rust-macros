@@ -45,7 +45,7 @@ impl EventStorage {
 }
 
 // Publisher Service - Using service macro with all attributes
-#[service(name = "publisher", path = "/publisher")]
+#[service(name = "publisher", path = "publisher")]
 #[derive(Clone)]
 struct PublisherService {
     storage: EventStorage,
@@ -56,68 +56,15 @@ impl PublisherService {
         Self { storage }
     }
 
-    // Add handle_operation method for manual operation handling
-    async fn handle_operation(&self, operation: &str, params: &Option<ValueType>) -> Result<ServiceResponse> {
-        match operation {
-            "validate" => {
-                if let Some(params) = params {
-                    if let Some(ValueType::String(event_data)) = params.get("event_data") {
-                        self.validate_event(event_data.clone()).await
-                    } else {
-                        Ok(ServiceResponse {
-                            status: ResponseStatus::Error,
-                            message: "Missing event_data parameter".to_string(),
-                            data: None,
-                        })
-                    }
-                } else {
-                    Ok(ServiceResponse {
-                        status: ResponseStatus::Error,
-                        message: "Missing parameters".to_string(),
-                        data: None,
-                    })
-                }
-            },
-            "publish" => {
-                // Return a simple success response since this is just a test
-                Ok(ServiceResponse {
-                    status: ResponseStatus::Success,
-                    message: "Event published".to_string(),
-                    data: None,
-                })
-            },
-            "notify" => {
-                // Return a simple success response since this is just a test
-                Ok(ServiceResponse {
-                    status: ResponseStatus::Success,
-                    message: "Notification sent".to_string(),
-                    data: None,
-                })
-            },
-            _ => Ok(ServiceResponse {
-                status: ResponseStatus::Error,
-                message: format!("Unknown operation: {}", operation),
-                data: None,
-            }),
-        }
-    }
-
-    // Use action macro for validate_event
+    // Use action macro for validate_event with proper return type
     #[action(name = "validate")]
-    async fn validate_event(&self, event_data: String) -> Result<ServiceResponse> {
+    async fn validate_event(&self, event_data: String) -> Result<String> {
         // Just a simple validation
         if event_data.contains("valid") {
-            Ok(ServiceResponse {
-                status: ResponseStatus::Success,
-                message: "Event is valid".to_string(),
-                data: Some(ValueType::String("valid".to_string())),
-            })
+            Ok("valid".to_string())
         } else {
-            Ok(ServiceResponse {
-                status: ResponseStatus::Error,
-                message: "Event is invalid".to_string(),
-                data: Some(ValueType::String("invalid".to_string())),
-            })
+            // For errors, we can still use anyhow's Error
+            Err(anyhow::anyhow!("Event is invalid"))
         }
     }
 
@@ -146,9 +93,9 @@ impl PublisherService {
         Ok(())
     }
 
-    // Use action macro for publish_action
+    // Use action macro for publish_action with proper return type
     #[action(name = "publish")]
-    async fn publish_action(&self, context: &RequestContext, topic: String, data: String) -> Result<ServiceResponse> {
+    async fn publish_action(&self, context: &RequestContext, topic: String, data: String) -> Result<String> {
         log_subscription(
             self.service_name(),
             "PUBLISH-DATA",
@@ -158,16 +105,12 @@ impl PublisherService {
         // Call the publish method
         self.publish_event(context, &topic, &data).await?;
 
-        Ok(ServiceResponse {
-            status: ResponseStatus::Success,
-            message: format!("Published to topic {}", topic),
-            data: None,
-        })
+        Ok(format!("Published to topic {}", topic))
     }
     
-    // Use action macro for notify_action
+    // Use action macro for notify_action with proper return type
     #[action(name = "notify")]
-    async fn notify_action(&self, context: &RequestContext, message: String) -> Result<ServiceResponse> {
+    async fn notify_action(&self, context: &RequestContext, message: String) -> Result<String> {
         log_subscription(
             self.service_name(),
             "NOTIFY-ACTION",
@@ -191,11 +134,7 @@ impl PublisherService {
             &format!("Notification published to topic '{}'", topic),
         );
 
-        Ok(ServiceResponse {
-            status: ResponseStatus::Success,
-            message: "Notification sent".to_string(),
-            data: None,
-        })
+        Ok("Notification sent".to_string())
     }
     
     // Use subscribe macro for status updates
@@ -220,7 +159,7 @@ impl PublisherService {
 }
 
 // Listener Service - Using service macro
-#[service(name = "listener", path = "/listener")]
+#[service(name = "listener", path = "listener")]
 #[derive(Clone)]
 struct ListenerService {
     storage: Arc<EventStorage>,
@@ -237,23 +176,11 @@ impl ListenerService {
         }
     }
 
-    // Add handle_operation method for manual operation handling
-    async fn handle_operation(&self, operation: &str, _params: &Option<ValueType>) -> Result<ServiceResponse> {
-        match operation {
-            "get_notifications" => {
-                let notifications = self.storage.notifications.lock().await;
-                Ok(ServiceResponse {
-                    status: ResponseStatus::Success,
-                    message: format!("Retrieved {} notifications", notifications.len()),
-                    data: Some(ValueType::Number(notifications.len() as f64)),
-                })
-            },
-            _ => Ok(ServiceResponse {
-                status: ResponseStatus::Error,
-                message: format!("Unknown operation: {}", operation),
-                data: None,
-            }),
-        }
+    // Action to get notifications with proper return type
+    #[action(name = "get_notifications")]
+    async fn get_notifications(&self) -> Result<usize> {
+        let notifications = self.storage.notifications.lock().await;
+        Ok(notifications.len())
     }
 
     #[subscribe(topic = "test/valid")]
@@ -287,23 +214,20 @@ impl ListenerService {
     }
 
     #[action]
-    async fn test_action(&self, message: String) -> Result<ServiceResponse> {
+    async fn test_action(&self, message: String) -> Result<String> {
         println!("Test action called with message: {}", message);
-        Ok(ServiceResponse::success(format!("Processed: {}", message), Some(ValueType::String(format!("Processed: {}", message)))))
+        Ok(format!("Processed: {}", message))
     }
 
+    #[action(name = "get_valid_events")]
     async fn get_valid_events(&self) -> Result<Vec<String>> {
         let events = self.storage.valid_events.lock().await;
         Ok(events.clone())
     }
 
+    #[action(name = "get_invalid_events")]
     async fn get_invalid_events(&self) -> Result<Vec<String>> {
         let events = self.storage.invalid_events.lock().await;
-        Ok(events.clone())
-    }
-
-    async fn get_notifications(&self) -> Result<Vec<String>> {
-        let events = self.storage.notifications.lock().await;
         Ok(events.clone())
     }
 }
@@ -419,40 +343,54 @@ async fn test_p2p_publish_subscribe() -> Result<()> {
 
         // Extract the events and verify
         if let Some(valid_data) = valid_events_response.data {
-            if let ValueType::String(valid_events_json) = valid_data {
-                let valid_events: Vec<String> = serde_json::from_str(&valid_events_json)?;
-                assert!(valid_events.len() >= 2, "Should have received at least 2 valid events");
-                
-                // Check for the valid event
-                let has_valid_event = valid_events.iter().any(|event| {
-                    event.contains("valid")
-                });
-                assert!(has_valid_event, "Should have a valid event");
-                
-                // Check for the status update
-                let has_status_update = valid_events.iter().any(|event| {
-                    event.contains("STATUS:")
-                });
-                assert!(has_status_update, "Should have a status update event");
-                
-                // Check for notification if it was stored as valid
-                let has_notification = valid_events.iter().any(|event| {
-                    event.contains("NOTIFICATION:")
-                });
-                
-                if has_notification {
-                    println!("Found notification in valid events as expected");
-                }
+            // Using ValueType directly since ServiceResponse contains data as ValueType
+            let valid_events: Vec<String> = if let ValueType::Array(events) = valid_data {
+                events.into_iter()
+                    .filter_map(|e| if let ValueType::String(s) = e { Some(s) } else { None })
+                    .collect()
+            } else if let ValueType::String(json_str) = valid_data {
+                serde_json::from_str(&json_str)?
+            } else {
+                vec![]
+            };
+            assert!(valid_events.len() >= 2, "Should have received at least 2 valid events");
+            
+            // Check for the valid event
+            let has_valid_event = valid_events.iter().any(|event| {
+                event.contains("valid")
+            });
+            assert!(has_valid_event, "Should have a valid event");
+            
+            // Check for the status update
+            let has_status_update = valid_events.iter().any(|event| {
+                event.contains("STATUS:")
+            });
+            assert!(has_status_update, "Should have a status update event");
+            
+            // Check for notification if it was stored as valid
+            let has_notification = valid_events.iter().any(|event| {
+                event.contains("NOTIFICATION:")
+            });
+            
+            if has_notification {
+                println!("Found notification in valid events as expected");
             }
         }
 
         if let Some(invalid_data) = invalid_events_response.data {
-            if let ValueType::String(invalid_events_json) = invalid_data {
-                let invalid_events: Vec<String> = serde_json::from_str(&invalid_events_json)?;
-                assert_eq!(invalid_events.len(), 1, "Should have received 1 invalid event");
-                if let Some(invalid_event) = invalid_events.get(0) {
-                    assert!(invalid_event.contains("invalid"), "Invalid event should contain 'invalid'");
-                }
+            // Using ValueType directly since ServiceResponse contains data as ValueType
+            let invalid_events: Vec<String> = if let ValueType::Array(events) = invalid_data {
+                events.into_iter()
+                    .filter_map(|e| if let ValueType::String(s) = e { Some(s) } else { None })
+                    .collect()
+            } else if let ValueType::String(json_str) = invalid_data {
+                serde_json::from_str(&json_str)?
+            } else {
+                vec![]
+            };
+            assert_eq!(invalid_events.len(), 1, "Should have received 1 invalid event");
+            if let Some(invalid_event) = invalid_events.get(0) {
+                assert!(invalid_event.contains("invalid"), "Invalid event should contain 'invalid'");
             }
         }
 
@@ -472,8 +410,8 @@ async fn test_service_info_trait() {
     assert_eq!("listener", listener.service_name());
     
     // Verify service_path is correctly set
-    assert_eq!("/publisher", publisher.service_path());
-    assert_eq!("/listener", listener.service_path());
+    assert_eq!("publisher", publisher.service_path());
+    assert_eq!("listener", listener.service_path());
     
     // Verify default values are used for description and version
     assert_eq!("Service PublisherService", publisher.service_description());
@@ -494,10 +432,5 @@ async fn test_service_macros() {
     let response = listener.test_action(message).await.unwrap();
     
     // Verify the response
-    assert_eq!(response.status, ResponseStatus::Success);
-    if let Some(ValueType::String(data)) = response.data {
-        assert_eq!(data, "Processed: Test message");
-    } else {
-        panic!("Expected string data in response");
-    }
+    assert_eq!(response, "Processed: Test message");
 } 
