@@ -1,6 +1,6 @@
 mod common;
 use common::ServiceInfo;
-use kagi_macros::service;
+use runar_macros::service;
 
 #[test]
 fn test_service_only() {

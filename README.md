@@ -1,12 +1,12 @@
-# Kagi Macros
+# Runar Macros
 
-This crate provides procedural macros for the Kagi Node system, making it easier to define services, actions, and handle events.
+This crate provides procedural macros for the Runar Node system, making it easier to define services, actions, and handle events.
 
 > **Development Status**: The macros are fully functional and support both compile-time and runtime registration approaches. All tests now pass, including comprehensive end-to-end tests that validate the entire service lifecycle.
 
 ## Implementation Approaches
 
-Kagi macros support two implementation approaches:
+Runar macros support two implementation approaches:
 
 1. **Distributed Slices (Compile-time)**: Using the `linkme` crate to register handlers, actions, and subscriptions at compile time. This approach is more efficient but requires the unstable `#[used(linker)]` attribute.
 
@@ -17,7 +17,7 @@ Kagi macros support two implementation approaches:
 ## Available Macros
 
 ### Service Macro
-The `service` macro is used to define a Kagi service by implementing the `AbstractService` trait.
+The `service` macro is used to define a Runar service by implementing the `AbstractService` trait.
 
 ```rust
 #[service(
@@ -83,8 +83,8 @@ When writing tests that use macros, you don't need to enable the `distributed_sl
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kagi_macros::{service, action};
-    use kagi_node::test_utils::TestNode;
+    use runar_macros::{service, action};
+    use runar_node::test_utils::TestNode;
     
     #[service(name = "test_service")]
     struct TestService {}
@@ -115,8 +115,8 @@ mod tests {
 ## Basic Example
 
 ```rust
-use kagi_macros::{service, action, process};
-use kagi_node::services::{ServiceResponse, RequestContext, ValueType};
+use runar_macros::{service, action, process};
+use runar_node::services::{ServiceResponse, RequestContext, ValueType};
 use anyhow::Result;
 
 #[service(

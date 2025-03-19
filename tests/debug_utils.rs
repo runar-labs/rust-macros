@@ -1,4 +1,4 @@
-// Debug utilities for the kagi_macros crate
+// Debug utilities for the runar_macros crate
 
 /// Module for detecting and reporting on feature configurations
 pub mod feature_detection {
@@ -27,10 +27,10 @@ pub mod feature_detection {
     };
     
     // Add the missing constants
-    pub static FEATURE_KAGI_NODE: &str = if cfg!(feature = "kagi_node") {
-        "Enabled"
+    pub static FEATURE_RUNAR_NODE: &str = if cfg!(feature = "runar_node") {
+        "enabled"
     } else {
-        "Disabled"
+        "disabled"
     };
     
     pub static FEATURE_DISTRIBUTED_SLICE: &str = if cfg!(feature = "distributed_slice") {
@@ -52,7 +52,7 @@ pub mod feature_detection {
         println!("  - feature=\"web\": {}", FEATURE_WEB);
         println!("  - feature=\"mobile\": {}", FEATURE_MOBILE);
         println!("  - feature=\"desktop\": {}", FEATURE_DESKTOP);
-        println!("  - feature=\"kagi_node\": {}", FEATURE_KAGI_NODE);
+        println!("  - feature=\"runar_node\": {}", FEATURE_RUNAR_NODE);
         println!("  - feature=\"distributed_slice\": {}", FEATURE_DISTRIBUTED_SLICE);
         println!("  - feature=\"linkme\": {}", FEATURE_LINKME);
     }
@@ -95,7 +95,7 @@ pub mod debug_utils {
         println!("  - feature=\"web\": {}", feature_detection::FEATURE_WEB);
         println!("  - feature=\"mobile\": {}", feature_detection::FEATURE_MOBILE);
         println!("  - feature=\"desktop\": {}", feature_detection::FEATURE_DESKTOP);
-        println!("  - feature=\"kagi_node\": {}", feature_detection::FEATURE_KAGI_NODE);
+        println!("  - feature=\"runar_node\": {}", feature_detection::FEATURE_RUNAR_NODE);
         println!("  - feature=\"distributed_slice\": {}", feature_detection::FEATURE_DISTRIBUTED_SLICE);
         println!("  - feature=\"linkme\": {}", feature_detection::FEATURE_LINKME);
     }
@@ -123,7 +123,7 @@ pub mod registry_type_detection {
         
         println!("Registry types:");
         println!("  FEATURE_NODE_IMPLEMENTATION: {}", feature_detection::FEATURE_NODE_IMPLEMENTATION);
-        println!("  FEATURE_KAGI_NODE: {}", feature_detection::FEATURE_KAGI_NODE);
+        println!("  FEATURE_RUNAR_NODE: {}", feature_detection::FEATURE_RUNAR_NODE);
         println!("  FEATURE_DISTRIBUTED_SLICE: {}", feature_detection::FEATURE_DISTRIBUTED_SLICE);
         println!("  FEATURE_LINKME: {}", feature_detection::FEATURE_LINKME);
     }
