@@ -82,7 +82,7 @@ impl PublisherService {
             "timestamp": chrono::Utc::now().to_rfc3339(),
         });
 
-        log_event_published(self.service_name(), &full_topic);
+        log_published_event(self.service_name(), &full_topic);
         context.publish(&full_topic, event_data).await?;
         log_subscription(
             self.service_name(),
@@ -140,7 +140,7 @@ impl PublisherService {
     // Use subscribe macro for status updates
     #[subscribe(topic = "listener/status")]
     async fn on_listener_status(&self, payload: ValueType) -> Result<()> {
-        log_callback(self.service_name(), "listener/status");
+        log_callback_execution(self.service_name(), "listener/status");
         
         if let ValueType::Json(json_value) = payload {
             if let Some(status) = json_value["status"].as_str() {

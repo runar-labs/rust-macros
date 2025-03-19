@@ -1,6 +1,11 @@
 // This file is kept empty as the service macro implementation
 // has been moved to lib.rs to meet Rust's requirement that
 // proc macros must be defined at the crate root. 
+//
+// NOTE: The service macro implementation has been simplified to only use AbstractService.
+// Previously, both ServiceInfo and AbstractService were implemented separately, 
+// but this created unnecessary duplication. Now, metadata methods (name, path,
+// description, version) are directly implemented in AbstractService.
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -187,25 +192,6 @@ pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
                 
                 Ok(())
-            }
-        }
-        
-        // Implement ServiceInfo trait for backward compatibility
-        impl runar_common::ServiceInfo for #struct_name {
-            fn service_name(&self) -> &str {
-                #service_name
-            }
-            
-            fn service_path(&self) -> &str {
-                #service_path
-            }
-            
-            fn service_description(&self) -> &str {
-                #service_desc
-            }
-            
-            fn service_version(&self) -> &str {
-                #service_version
             }
         }
     };

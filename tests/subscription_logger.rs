@@ -24,4 +24,12 @@ pub fn log_event_published(component: &str, topic: &str) {
 /// Log an error message
 pub fn log_error(component: &str, message: &str) {
     log_subscription(component, "ERROR", message);
+}
+
+pub fn log_callback_execution(component: &str, topic: &str) {
+    println!("[{}] Executing callback for topic: {}", component, topic);
+}
+
+pub fn log_published_event(component: &str, topic: &str) {
+    println!("[{}] Published event to topic: {}", component, topic);
 } 
