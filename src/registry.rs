@@ -36,6 +36,7 @@ pub struct SubscriptionHandler {
     pub method_name: String,
     pub topic: String,
     pub is_full_path: bool,
+    pub service_type_id: TypeId,
     pub register_fn: SubscriptionRegisterFn,
 }
 

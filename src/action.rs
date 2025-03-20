@@ -59,8 +59,9 @@ pub fn action(attr: TokenStream, item: TokenStream) -> TokenStream {
         // Extract name-value pairs
         let name_value_pairs = crate::utils::extract_name_value_pairs(&meta_vec);
         
-        // Find the name attribute
-        name_value_pairs.get("name")
+        // Find the name attribute or default to method name
+        name_value_pairs
+            .get("name")
             .cloned()
             .unwrap_or_else(|| method_name_str.clone())
     };
@@ -76,62 +77,64 @@ pub fn action(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Extract parameters from the function signature
     let parameters = extract_parameters(&input_fn.sig.inputs);
     
-    // Generate parameter extraction code
+    // Generate code for parameter extraction
     let param_extraction = generate_parameter_extraction(&parameters);
     
-    // Generate parameter names for the method call
+    // Generate parameter names for method call
     let param_names = parameters.iter()
         .filter(|p| p.name != "context" && p.name != "ctx" && p.name != "_context" && p.name != "_ctx")
-        .map(|p| Ident::new(&p.name, Span::call_site()));
+        .map(|p| {
+            let name = &p.name;
+            syn::parse_str::<syn::Ident>(name).unwrap()
+        });
     
-    // Full implementation with node_implementation feature
+    // Extract the receiver type (service type) from the first parameter
+    let self_ty = match &input_fn.sig.inputs.first() {
+        Some(syn::FnArg::Receiver(receiver)) => {
+            // Use turbofish syntax with generics in the impl block
+            quote! { Self }
+        }
+        _ => {
+            // This is an error - action handlers must be methods
+            return syn::Error::new_spanned(
+                &input_fn.sig,
+                "Action handlers must be methods with &self or &mut self parameter",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+    
+    // Generate the implementation
     let output = quote! {
-        // Keep the original function implementation
+        // Keep the original function
         #input_fn
         
-        // Add code to register this action in the service's operation dispatch table
-        #[doc(hidden)]
-        #[allow(non_snake_case)]
-        const _: () = {
-            // Register this action in the action registry
-            #[allow(non_upper_case_globals)]
-            static REGISTER_ACTION: () = {
-                extern crate std;
-                
-                // Register this action with the service's action registry
-                ::inventory::submit! {
-                    crate::registry::ActionItem {
-                        name: #operation_name.to_string(),
-                        service_type_id: std::any::TypeId::of::<Self>(),
-                        handler_fn: |svc, context, _operation, params| {
-                            Box::pin(async move {
-                                // Extract parameters from the request
-                                #param_extraction
-                                
-                                // Downcast the service to our concrete type
-                                let concrete_svc = match (svc as &dyn std::any::Any).downcast_ref::<Self>() {
-                                    Some(s) => s,
-                                    None => return Err(anyhow::anyhow!("Failed to downcast service to the required type"))
-                                };
-                                
-                                // Call the actual method with extracted parameters and get the result
-                                let result = match concrete_svc.#method_name(context, #(#param_names),*).await {
-                                    // Success case - wrap the result in a ServiceResponse
-                                    Ok(value) => runar_node::services::ServiceResponse::ok(value),
-                                    // Error case - create an error response
-                                    Err(e) => runar_node::services::ServiceResponse::error(
-                                        e.to_string()
-                                    ),
-                                };
-                                
-                                // Return the response
-                                Ok(result)
-                            })
-                        }
-                    }
-                };
-            };
-        };
+        // Register the action handler in the registry
+        inventory::submit! {
+            crate::registry::ActionItem {
+                name: #operation_name.to_string(),
+                service_type_id: std::any::TypeId::of::<#self_ty>(),
+                handler_fn: Box::new(move |service_ref, context, _operation, params| {
+                    Box::pin(async move {
+                        use anyhow::Context;
+                        
+                        // Downcast the service reference to our concrete type
+                        let service = service_ref.downcast_ref::<#self_ty>()
+                            .ok_or_else(|| anyhow::anyhow!("Service type mismatch in action handler"))?;
+                        
+                        // Extract parameters from the request
+                        #param_extraction
+                        
+                        // Call the actual handler method
+                        let result = service.#method_name(context, #(#param_names),*).await?;
+                        
+                        // Convert the result to a ServiceResponse
+                        Ok(runar_node::services::ServiceResponse::new(result))
+                    })
+                }),
+            }
+        }
     };
     
     TokenStream::from(output)

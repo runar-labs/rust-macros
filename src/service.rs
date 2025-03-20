@@ -129,7 +129,18 @@ pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
             
             fn metadata(&self) -> runar_node::services::ServiceMetadata {
-                let operations = vec![];
+                // Use registry to get operations if available
+                let handlers = crate::registry::get_action_handlers();
+                let type_id = std::any::TypeId::of::<#struct_name>();
+                
+                // Find all handlers for this service type
+                let mut operations = Vec::new();
+                for handler in handlers {
+                    if handler.service_type_id == type_id {
+                        operations.push(handler.name.clone());
+                    }
+                }
+                
                 runar_node::services::ServiceMetadata::new(operations, self.description().to_string())
             }
             
@@ -184,12 +195,15 @@ pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
             async fn setup_subscriptions(&self, context: &runar_node::services::RequestContext) -> anyhow::Result<()> {
                 // Register all event subscriptions defined with the subscribe macro
                 let handlers = crate::registry::get_subscription_handlers();
+                let type_id = std::any::TypeId::of::<#struct_name>();
                 let service_ref: &dyn std::any::Any = self;
                 
-                // Call the registration function for each handler that matches our type
+                // Only register handlers that match our type
                 for handler in handlers {
-                    // Call the registration function
-                    (handler.register_fn)(service_ref, context).await?;
+                    if handler.service_type_id == type_id {
+                        // Call the registration function
+                        (handler.register_fn)(service_ref, context).await?;
+                    }
                 }
                 
                 Ok(())

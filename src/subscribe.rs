@@ -50,106 +50,98 @@ pub fn subscribe(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Parse the function definition
     let input_fn = parse_macro_input!(item as ItemFn);
     
-    // Verify method is async
-    if input_fn.sig.asyncness.is_none() {
-        return syn::Error::new_spanned(
-            input_fn.sig.fn_token,
-            "subscribe handlers must be async"
-        ).to_compile_error().into();
-    }
-    
-    // Extract the method name which will be used as default topic if none provided
+    // Extract the method name
     let method_name = &input_fn.sig.ident;
     let method_name_str = method_name.to_string();
     
-    // Get the topic from attributes
-    let topic = if attr.is_empty() {
-        // If no attributes, use the method name as the topic
-        method_name_str.clone()
-    } else {
-        // Parse the attribute tokens into a list of Meta items
-        let parser = syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated;
-        let meta_list = parser.parse(attr.clone().into()).unwrap_or_default();
-        
-        // Convert meta_list into a Vec<Meta>
-        let meta_vec: Vec<Meta> = meta_list.into_iter().collect();
-        
-        // Extract name-value pairs
-        let name_value_pairs = extract_name_value_pairs(&meta_vec);
-        
-        // Find the topic attribute
-        name_value_pairs.get("topic")
-            .cloned()
-            .unwrap_or_else(|| method_name_str.clone())
-    };
+    // Parse the attribute tokens into a list of Meta items
+    let parser = syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated;
+    let meta_list = parser.parse(attr.clone().into()).unwrap_or_default();
     
-    // Determine if the topic is a full path (contains a slash)
+    // Convert meta_list into a Vec<Meta>
+    let meta_vec: Vec<Meta> = meta_list.into_iter().collect();
+    
+    // Extract name-value pairs
+    let attrs = extract_name_value_pairs(&meta_vec);
+    
+    // Extract the topic from attributes or use method name
+    let topic = attrs.get("topic").cloned().unwrap_or_else(|| method_name_str.clone());
+    
+    // Check if this is a full path
     let is_full_path = topic.contains('/');
     
-    // Generate code to register subscription during service initialization
+    // Extract the receiver type (service type) from the first parameter
+    let self_ty = match &input_fn.sig.inputs.first() {
+        Some(syn::FnArg::Receiver(receiver)) => {
+            // Find the impl block this method is part of
+            match &receiver.self_token {
+                _ => {
+                    // Use turbofish syntax with generics in the impl block
+                    quote! { Self }
+                }
+            }
+        }
+        _ => {
+            // This is an error - event handlers must be methods
+            return syn::Error::new_spanned(
+                &input_fn.sig,
+                "Event handlers must be methods with &self or &mut self parameter",
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+    
+    // The generated subscription handler
     let output = quote! {
-        // Keep the original handler method unchanged
+        // Keep the original function
         #input_fn
         
-        // Add code to register this subscription during service initialization
-        #[doc(hidden)]
-        #[allow(non_snake_case)]
-        const _: () = {
-            // Add this subscription to the service's subscription registry
-            #[allow(non_upper_case_globals)]
-            static REGISTER_SUBSCRIPTION: () = {
-                extern crate std;
-                
-                // Add the subscription setup code for this handler
-                ::inventory::submit! {
-                    crate::registry::SubscriptionHandler {
-                        method_name: #method_name_str,
-                        topic: #topic,
-                        is_full_path: #is_full_path,
-                        register_fn: |svc, ctx| {
-                            Box::pin(async move {
-                                // Downcast the service from Any to our concrete type
-                                let svc_clone = if let Some(typed_service) = (svc as &dyn std::any::Any).downcast_ref::<Self>() {
-                                    typed_service.clone()
-                                } else {
-                                    // If downcast fails, this is a serious error
-                                    return Err(anyhow::anyhow!("Failed to downcast service to concrete type for subscription handler"));
-                                };
-                                
-                                // Construct the full topic path 
-                                let topic_path = if #is_full_path {
-                                    #topic.to_string()
-                                } else {
-                                    // For relative paths, prefix with service path
-                                    format!("{}/{}", svc_clone.path(), #topic)
-                                };
-                                
-                                // Register directly with the context
-                                ctx.subscribe(&topic_path, move |payload| {
-                                    // Get another clone for the actual handler execution
-                                    let mut service = svc_clone.clone();
-                                    
-                                    // Return a future that calls our handler method
-                                    Box::pin(async move {
-                                        // Call the actual method with proper error handling
-                                        match service.#method_name(payload).await {
-                                            Ok(()) => Ok(()),
-                                            Err(e) => {
-                                                // Log the error but don't propagate it to prevent subscription cancellation
-                                                eprintln!("Error in subscription handler for topic {}: {:?}", #topic, e);
-                                                Ok(())
-                                            }
-                                        }
-                                    })
-                                }).await.map_err(|e| {
-                                    anyhow::anyhow!("Failed to subscribe to topic {}: {}", topic_path, e)
-                                })
-                            })
+        // Register the subscription handler
+        inventory::submit! {
+            crate::registry::SubscriptionHandler {
+                method_name: #method_name_str.to_string(),
+                topic: #topic.to_string(),
+                is_full_path: #is_full_path,
+                service_type_id: std::any::TypeId::of::<#self_ty>(),
+                register_fn: Box::new(|service_ref, ctx| {
+                    Box::pin(async move {
+                        // Cast to the correct service type
+                        let service = service_ref.downcast_ref::<#self_ty>()
+                            .ok_or_else(|| anyhow::anyhow!("Service type mismatch in subscribe macro"))?;
+                        
+                        // Get the service path for topic prefixing if needed
+                        let mut full_topic = #topic.to_string();
+                        if !#is_full_path {
+                            // Prefix with service path to make a full topic
+                            let service_path = service.path();
+                            let path_prefix = if service_path.starts_with('/') {
+                                &service_path[1..]  // Remove leading slash
+                            } else {
+                                service_path
+                            };
+                            
+                            if !path_prefix.is_empty() {
+                                full_topic = format!("{}/{}", path_prefix, full_topic);
+                            }
                         }
-                    }
-                };
-            };
-        };
+                        
+                        // Create a cloned service for the subscription to avoid ownership issues
+                        let mut service_clone = service.clone();
+                        
+                        // Subscribe to the topic
+                        ctx.subscribe(full_topic, move |payload| {
+                            let mut service = service_clone.clone();
+                            Box::pin(async move {
+                                service.#method_name(payload).await
+                            })
+                        }).await?;
+                        
+                        Ok(())
+                    })
+                }),
+            }
+        }
     };
     
     TokenStream::from(output)
