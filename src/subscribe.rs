@@ -102,7 +102,7 @@ pub fn subscribe(attr: TokenStream, item: TokenStream) -> TokenStream {
                 
                 // Add the subscription setup code for this handler
                 ::inventory::submit! {
-                    crate::subscription_registry::SubscriptionHandler {
+                    crate::registry::SubscriptionHandler {
                         method_name: #method_name_str,
                         topic: #topic,
                         is_full_path: #is_full_path,

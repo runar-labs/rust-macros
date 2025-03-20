@@ -12,6 +12,7 @@ mod service;
 mod subscribe;
 mod subscription_registry;
 mod utils;
+mod registry; // Internal registry module
 
 /// Macro for defining a service
 #[proc_macro_attribute]

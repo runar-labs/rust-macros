@@ -100,7 +100,7 @@ pub fn action(attr: TokenStream, item: TokenStream) -> TokenStream {
                 
                 // Register this action with the service's action registry
                 ::inventory::submit! {
-                    crate::action_registry::ActionItem {
+                    crate::registry::ActionItem {
                         name: #operation_name.to_string(),
                         service_type_id: std::any::TypeId::of::<Self>(),
                         handler_fn: |svc, context, _operation, params| {
@@ -117,14 +117,10 @@ pub fn action(attr: TokenStream, item: TokenStream) -> TokenStream {
                                 // Call the actual method with extracted parameters and get the result
                                 let result = match concrete_svc.#method_name(context, #(#param_names),*).await {
                                     // Success case - wrap the result in a ServiceResponse
-                                    Ok(value) => runar_node::services::ServiceResponse::success(
-                                        value,
-                                        None
-                                    ),
+                                    Ok(value) => runar_node::services::ServiceResponse::ok(value),
                                     // Error case - create an error response
                                     Err(e) => runar_node::services::ServiceResponse::error(
-                                        e.to_string(),
-                                        None
+                                        e.to_string()
                                     ),
                                 };
                                 

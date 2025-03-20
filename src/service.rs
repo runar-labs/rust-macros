@@ -125,17 +125,18 @@ pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
             
             fn state(&self) -> runar_node::services::ServiceState {
-                runar_node::services::ServiceState::Initialized
+                runar_node::services::ServiceState::Created
             }
             
             fn metadata(&self) -> runar_node::services::ServiceMetadata {
-                runar_node::services::ServiceMetadata::new()
+                let operations = vec![];
+                runar_node::services::ServiceMetadata::new(operations, self.description().to_string())
             }
             
             // Service initialization - sets up event subscriptions
-            async fn init(&mut self, context: &runar_node::services::RequestContext) -> anyhow::Result<()> {
+            async fn init(&mut self, ctx: &runar_node::services::RequestContext) -> anyhow::Result<()> {
                 // Register all event subscriptions
-                self.setup_subscriptions(context).await?;
+                self.setup_subscriptions(ctx).await?;
                 Ok(())
             }
             
@@ -156,19 +157,19 @@ pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
             ) -> anyhow::Result<runar_node::services::ServiceResponse> {
                 // Extract operation and parameters
                 let operation = &request.operation;
-                let params = request.params.unwrap_or(runar_common::types::ValueType::Null);
+                let params = request.params.clone().unwrap_or_default();
                 let context = &request.context;
                 
                 // Use the action registry to dispatch to the correct handler
                 let service_ref: &dyn std::any::Any = self;
-                let handlers = crate::action_registry::get_action_handlers();
+                let handlers = crate::registry::get_action_handlers();
                 let type_id = std::any::TypeId::of::<#struct_name>();
                 
                 // Find a handler for this operation
                 for handler in handlers {
                     if handler.service_type_id == type_id && handler.name == operation {
                         // Found a matching handler - call it
-                        return (handler.handler_fn)(service_ref, context, operation, params).await
+                        return (handler.handler_fn)(service_ref, context, operation, params.clone()).await
                             .map_err(|e| anyhow::anyhow!("Error in {}.{}: {}", #service_name, operation, e));
                     }
                 }
@@ -182,7 +183,7 @@ pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
         impl #struct_name {
             async fn setup_subscriptions(&self, context: &runar_node::services::RequestContext) -> anyhow::Result<()> {
                 // Register all event subscriptions defined with the subscribe macro
-                let handlers = crate::subscription_registry::get_subscription_handlers();
+                let handlers = crate::registry::get_subscription_handlers();
                 let service_ref: &dyn std::any::Any = self;
                 
                 // Call the registration function for each handler that matches our type
