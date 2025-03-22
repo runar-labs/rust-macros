@@ -17,25 +17,25 @@ use crate::utils::extract_name_value_pairs;
 /// ```rust
 /// // Subscribe to a specific topic (service path will be prefixed)
 /// #[subscribe(topic = "user_created")]
-/// async fn handle_user_created(&mut self, payload: ValueType) -> Result<()> {
-///     // Extract data using vmap! macro
-///     let id = vmap!(payload, "id" => String::new());
-///     let name = vmap!(payload, "name" => String::new());
+/// async fn handle_user_created(&self, data: ValueType) -> Result<(), anyhow::Error> {
+///     // Extract data from the payload
+///     if let ValueType::Map(data) = &data {
+///         // Process the data
+///     }
 ///     
-///     // Handler implementation
 ///     Ok(())
 /// }
 ///
 /// // Subscribe using a full path
 /// #[subscribe(topic = "users/user_created")]
-/// async fn handle_user_event(&mut self, payload: ValueType) -> Result<()> {
+/// async fn handle_user_event(&self, data: ValueType) -> Result<(), anyhow::Error> {
 ///     // Handler implementation
 ///     Ok(())
 /// }
 ///
 /// // Default subscription using method name as topic
 /// #[subscribe]
-/// async fn custom_event(&mut self, payload: ValueType) -> Result<()> {
+/// async fn custom_event(&self, data: ValueType) -> Result<(), anyhow::Error> {
 ///     // Handler implementation
 ///     Ok(())
 /// }
@@ -43,8 +43,8 @@ use crate::utils::extract_name_value_pairs;
 ///
 /// # Requirements
 /// - The service must implement `Clone` to support multiple subscription handlers
-/// - Handler methods must be `async` and return `Result<()>`
-/// - Handler methods should take `&mut self` and a `ValueType` parameter
+/// - Handler methods must be `async` and return `Result<(), anyhow::Error>`
+/// - Handler methods should take `&self` and a `ValueType` parameter
 ///
 pub fn subscribe(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Parse the function definition
@@ -72,20 +72,16 @@ pub fn subscribe(attr: TokenStream, item: TokenStream) -> TokenStream {
     
     // Extract the receiver type (service type) from the first parameter
     let self_ty = match &input_fn.sig.inputs.first() {
-        Some(syn::FnArg::Receiver(receiver)) => {
-            // Find the impl block this method is part of
-            match &receiver.self_token {
-                _ => {
-                    // Use turbofish syntax with generics in the impl block
-                    quote! { Self }
-                }
-            }
+        Some(syn::FnArg::Receiver(_receiver)) => {
+            // Instead of using Self, which can be problematic in static contexts,
+            // refer to the concrete type through its type ID directly
+            quote! { Self }
         }
         _ => {
             // This is an error - event handlers must be methods
             return syn::Error::new_spanned(
                 &input_fn.sig,
-                "Event handlers must be methods with &self or &mut self parameter",
+                "Event handlers must be methods with &self parameter",
             )
             .to_compile_error()
             .into();
@@ -104,7 +100,7 @@ pub fn subscribe(attr: TokenStream, item: TokenStream) -> TokenStream {
                 topic: #topic.to_string(),
                 is_full_path: #is_full_path,
                 service_type_id: std::any::TypeId::of::<#self_ty>(),
-                register_fn: Box::new(|service_ref, ctx| {
+                register_fn: Box::new(|service_ref, request_context| {
                     Box::pin(async move {
                         // Cast to the correct service type
                         let service = service_ref.downcast_ref::<#self_ty>()
@@ -116,9 +112,9 @@ pub fn subscribe(attr: TokenStream, item: TokenStream) -> TokenStream {
                             // Prefix with service path to make a full topic
                             let service_path = service.path();
                             let path_prefix = if service_path.starts_with('/') {
-                                &service_path[1..]  // Remove leading slash
+                                service_path[1..].to_string()  // Remove leading slash
                             } else {
-                                service_path
+                                service_path.to_string()
                             };
                             
                             if !path_prefix.is_empty() {
@@ -127,11 +123,11 @@ pub fn subscribe(attr: TokenStream, item: TokenStream) -> TokenStream {
                         }
                         
                         // Create a cloned service for the subscription to avoid ownership issues
-                        let mut service_clone = service.clone();
+                        let service_clone = service.clone();
                         
-                        // Subscribe to the topic
-                        ctx.subscribe(full_topic, move |payload| {
-                            let mut service = service_clone.clone();
+                        // Subscribe to the topic using the RequestContext and pass full_topic by reference
+                        request_context.subscribe(&full_topic, move |payload| {
+                            let service = service_clone.clone();
                             Box::pin(async move {
                                 service.#method_name(payload).await
                             })

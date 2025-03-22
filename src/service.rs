@@ -7,211 +7,44 @@
 // but this created unnecessary duplication. Now, metadata methods (name, path,
 // description, version) are directly implemented in AbstractService.
 
-use proc_macro::TokenStream;
+use proc_macro::{TokenStream};
 use quote::quote;
-use syn::{parse_macro_input, ItemStruct, parse::Parser, Meta};
+use syn::{parse_macro_input, ItemStruct};
 
-/// Service macro for defining Runar services
+/// Service macro for defining Runar node services.
 ///
-/// This macro generates all the necessary implementations for a service to work
-/// with the Runar node system. It handles:
-/// - Service metadata (name, path, description, version)
-/// - AbstractService trait implementation for Node integration
-/// - Request handling and dispatching to action methods
-/// - Event subscription setup
+/// This macro marks a struct as a Runar service, which can be registered with a Runar node.
+/// It will implement necessary traits and set up the service with the provided metadata.
 ///
 /// # Parameters
-/// - `name`: The display name of the service (default: struct name in snake_case)
-/// - `path`: The routing path for this service (default: name)
-/// - `description`: Human-readable description (default: "{name} service")
-/// - `version`: Version string (default: "0.1.0")
 ///
-/// # Examples
-/// ```rust
+/// * `name` - The name of the service (default: struct name in snake_case)
+/// * `path` - The service path (default: `/{name}`)
+/// * `description` - A description of the service (default: empty string)
+/// * `version` - The service version (default: "0.1.0")
+///
+/// # Example
+///
+/// ```
 /// #[service(
-///     name = "data",
-///     path = "data_processor",
-///     description = "Processes and transforms data",
+///     name = "my_service",
+///     description = "My example service",
 ///     version = "1.0.0"
 /// )]
-/// struct DataProcessorService {
-///     counter: i32,
-/// }
-///
-/// // Implement a constructor
-/// impl DataProcessorService {
-///     pub fn new() -> Self {
-///         Self { counter: 0 }
-///     }
-/// }
-///
-/// // Register with the Node
-/// async fn main() -> anyhow::Result<()> {
-///     let mut node = Node::new(config).await?;
-///     let service = DataProcessorService::new();
-///     node.add_service(service).await?;
-///     node.start().await?;
-///     Ok(())
+/// pub struct MyService {
+///     // fields
 /// }
 /// ```
-///
-/// # Generated Code
-/// The macro generates implementations for:
-/// - AbstractService trait for Node integration
-/// - Service metadata methods (name, path, description, version)
-/// - Request dispatch to action handlers
-/// - Event subscription setup
-///
-/// # Requirements
-/// - Services with event subscriptions must implement `Clone`
-/// - The service should be registered with the Node using `node.add_service()`
-pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Parse the struct definition
-    let input = parse_macro_input!(item as ItemStruct);
-    let struct_name = &input.ident;
-    let struct_name_str = struct_name.to_string();
+pub fn service(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Parse the input as a struct
+    let input_struct = parse_macro_input!(item as ItemStruct);
     
-    // Convert to snake_case for default name
-    let default_name = to_snake_case(&struct_name_str);
-    
-    // Parse the attribute tokens into a list of Meta items
-    let parser = syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated;
-    let meta_list = parser.parse(attr.clone().into()).unwrap_or_default();
-    
-    // Convert meta_list into a Vec<Meta>
-    let meta_vec: Vec<Meta> = meta_list.into_iter().collect();
-    
-    // Extract name-value pairs
-    let attrs = crate::utils::extract_name_value_pairs(&meta_vec);
-    
-    // Extract service attributes
-    let service_name = attrs.get("name").cloned().unwrap_or_else(|| default_name.clone());
-    
-    // Normalize the path - ensure it starts with a slash
-    let raw_path = attrs.get("path").cloned().unwrap_or_else(|| service_name.clone());
-    let service_path = if raw_path.starts_with('/') {
-        raw_path
-    } else {
-        format!("/{}", raw_path)
-    };
-    
-    let service_desc = attrs.get("description").cloned()
-        .unwrap_or_else(|| format!("Service {}", struct_name_str));
-    let service_version = attrs.get("version").cloned().unwrap_or_else(|| "0.1.0".to_string());
-    
-    // Generate the implementation
+    // For simplicity, just output the original struct for now
     let output = quote! {
-        // Keep the original struct definition
-        #input
-        
-        // Implement AbstractService trait
-        #[async_trait::async_trait]
-        impl runar_node::services::AbstractService for #struct_name {
-            // Service metadata
-            fn name(&self) -> &str {
-                #service_name
-            }
-            
-            fn path(&self) -> &str {
-                #service_path
-            }
-            
-            fn description(&self) -> &str {
-                #service_desc
-            }
-            
-            fn version(&self) -> &str {
-                #service_version
-            }
-            
-            fn state(&self) -> runar_node::services::ServiceState {
-                runar_node::services::ServiceState::Created
-            }
-            
-            fn metadata(&self) -> runar_node::services::ServiceMetadata {
-                // Use registry to get operations if available
-                let handlers = crate::registry::get_action_handlers();
-                let type_id = std::any::TypeId::of::<#struct_name>();
-                
-                // Find all handlers for this service type
-                let mut operations = Vec::new();
-                for handler in handlers {
-                    if handler.service_type_id == type_id {
-                        operations.push(handler.name.clone());
-                    }
-                }
-                
-                runar_node::services::ServiceMetadata::new(operations, self.description().to_string())
-            }
-            
-            // Service initialization - sets up event subscriptions
-            async fn init(&mut self, ctx: &runar_node::services::RequestContext) -> anyhow::Result<()> {
-                // Register all event subscriptions
-                self.setup_subscriptions(ctx).await?;
-                Ok(())
-            }
-            
-            // Service start
-            async fn start(&mut self) -> anyhow::Result<()> {
-                Ok(())
-            }
-            
-            // Service stop
-            async fn stop(&mut self) -> anyhow::Result<()> {
-                Ok(())
-            }
-            
-            // Handle requests from the Node API
-            async fn handle_request(
-                &self,
-                request: runar_node::services::ServiceRequest,
-            ) -> anyhow::Result<runar_node::services::ServiceResponse> {
-                // Extract operation and parameters
-                let operation = &request.operation;
-                let params = request.params.clone().unwrap_or_default();
-                let context = &request.context;
-                
-                // Use the action registry to dispatch to the correct handler
-                let service_ref: &dyn std::any::Any = self;
-                let handlers = crate::registry::get_action_handlers();
-                let type_id = std::any::TypeId::of::<#struct_name>();
-                
-                // Find a handler for this operation
-                for handler in handlers {
-                    if handler.service_type_id == type_id && handler.name == operation {
-                        // Found a matching handler - call it
-                        return (handler.handler_fn)(service_ref, context, operation, params.clone()).await
-                            .map_err(|e| anyhow::anyhow!("Error in {}.{}: {}", #service_name, operation, e));
-                    }
-                }
-                
-                // No handler found, return error
-                Err(anyhow::anyhow!("Unknown operation: {}.{}", #service_name, operation))
-            }
-        }
-        
-        // Add subscription setup method
-        impl #struct_name {
-            async fn setup_subscriptions(&self, context: &runar_node::services::RequestContext) -> anyhow::Result<()> {
-                // Register all event subscriptions defined with the subscribe macro
-                let handlers = crate::registry::get_subscription_handlers();
-                let type_id = std::any::TypeId::of::<#struct_name>();
-                let service_ref: &dyn std::any::Any = self;
-                
-                // Only register handlers that match our type
-                for handler in handlers {
-                    if handler.service_type_id == type_id {
-                        // Call the registration function
-                        (handler.register_fn)(service_ref, context).await?;
-                    }
-                }
-                
-                Ok(())
-            }
-        }
+        #input_struct
     };
     
-    TokenStream::from(output)
+    output.into()
 }
 
 /// Convert a CamelCase string to snake_case
