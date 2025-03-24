@@ -19,15 +19,7 @@ mod registry; // Change from public to private
 /// Macro for defining a service
 #[proc_macro_attribute]
 pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
-    // Parse the input as a struct
-    let input_struct = parse_macro_input!(input as ItemStruct);
-    
-    // For simplicity, just output the original struct for now
-    let output = quote! {
-        #input_struct
-    };
-    
-    output.into()
+    service::service(args, input)
 }
 
 /// Macro for defining an action handler
