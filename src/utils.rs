@@ -1,7 +1,6 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Attribute, Ident, Path, Meta};
-use std::collections::HashMap;
 
 /// Resolves a crate name for use in macro-generated code.
 /// This function attempts to find the crate with the given name in the current scope.

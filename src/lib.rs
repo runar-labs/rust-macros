@@ -1,5 +1,5 @@
 use proc_macro::TokenStream;
-use syn::{parse_macro_input, ItemStruct, ItemFn};
+use syn::{parse_macro_input, ItemFn};
 use quote::quote;
 
 // Internal modules - private, not exported

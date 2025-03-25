@@ -1,7 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
 use anyhow::Result;
-use async_trait::async_trait;
 
 /// Handler function for a subscription
 #[derive(Debug)]
