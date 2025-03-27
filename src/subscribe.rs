@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
-use quote::quote;
-use syn::{parse_macro_input, ItemFn, Meta, parse::Parser};
+use quote::{quote, format_ident};
+use syn::{parse_macro_input, ItemFn, Meta, parse::Parser, Ident};
 use crate::utils::extract_name_value_pairs;
 
 /// Subscribe macro for defining event handlers in Runar services
@@ -70,72 +70,47 @@ pub fn subscribe(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Check if this is a full path
     let is_full_path = topic.contains('/');
     
-    // Extract the receiver type (service type) from the first parameter
-    let self_ty = match &input_fn.sig.inputs.first() {
-        Some(syn::FnArg::Receiver(_receiver)) => {
-            // Instead of using Self, which can be problematic in static contexts,
-            // refer to the concrete type through its type ID directly
-            quote! { Self }
-        }
-        _ => {
-            // This is an error - event handlers must be methods
-            return syn::Error::new_spanned(
-                &input_fn.sig,
-                "Event handlers must be methods with &self parameter",
-            )
-            .to_compile_error()
-            .into();
-        }
-    };
+    // Generate a registration method name that will be called during init
+    let register_method_name = format_ident!("register_{}_subscription", method_name);
     
-    // The generated subscription handler
+    // Generate the subscription registration implementation
     let output = quote! {
         // Keep the original function
         #input_fn
         
-        // Register the subscription handler
+        // Generate a registration method that will be called during service initialization
+        async fn #register_method_name(&mut self, context: &runar_node::services::RequestContext) -> anyhow::Result<()> {
+            // Get the full topic path, prefixing with service path if needed
+            let full_topic = if #is_full_path {
+                #topic.to_string()
+            } else {
+                // Need to prefix with service path
+                let service_path = self.path();
+                format!("{}/{}", service_path, #topic)
+            };
+            
+            // Create a cloned instance for the subscription callback
+            // This requires that the service implements Clone
+            let service_clone = self.clone();
+            
+            // Subscribe to the topic
+            context.subscribe(&full_topic, move |payload| {
+                let service = service_clone.clone();
+                Box::pin(async move {
+                    service.#method_name(payload).await
+                })
+            }).await?;
+            
+            Ok(())
+        }
+        
+        // Register this subscription in the service subscription registry
         inventory::submit! {
-            crate::registry::SubscriptionHandler {
-                method_name: #method_name_str.to_string(),
+            crate::registry::SubscriptionRegistry {
+                type_id: std::any::TypeId::of::<Self>(),
                 topic: #topic.to_string(),
                 is_full_path: #is_full_path,
-                service_type_id: std::any::TypeId::of::<#self_ty>(),
-                register_fn: Box::new(|service_ref, request_context| {
-                    Box::pin(async move {
-                        // Cast to the correct service type
-                        let service = service_ref.downcast_ref::<#self_ty>()
-                            .ok_or_else(|| anyhow::anyhow!("Service type mismatch in subscribe macro"))?;
-                        
-                        // Get the service path for topic prefixing if needed
-                        let mut full_topic = #topic.to_string();
-                        if !#is_full_path {
-                            // Prefix with service path to make a full topic
-                            let service_path = service.path();
-                            let path_prefix = if service_path.starts_with('/') {
-                                service_path[1..].to_string()  // Remove leading slash
-                            } else {
-                                service_path.to_string()
-                            };
-                            
-                            if !path_prefix.is_empty() {
-                                full_topic = format!("{}/{}", path_prefix, full_topic);
-                            }
-                        }
-                        
-                        // Create a cloned service for the subscription to avoid ownership issues
-                        let service_clone = service.clone();
-                        
-                        // Subscribe to the topic using the RequestContext and pass full_topic by reference
-                        request_context.subscribe(&full_topic, move |payload| {
-                            let service = service_clone.clone();
-                            Box::pin(async move {
-                                service.#method_name(payload).await
-                            })
-                        }).await?;
-                        
-                        Ok(())
-                    })
-                }),
+                registration_method: stringify!(#register_method_name).to_string(),
             }
         }
     };

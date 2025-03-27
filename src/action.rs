@@ -1,8 +1,9 @@
 use proc_macro::TokenStream;
-use quote::quote;
-use syn::{parse_macro_input, ItemFn, Ident, parse::Parser, Meta, Type, TypePath, Path, PathSegment};
+use quote::{quote, format_ident};
+use syn::{parse_macro_input, ItemFn, Ident, parse::Parser, Meta, Type, TypePath, Path, PathSegment, FnArg, PatType};
 use proc_macro2::Span;
 use rand;
+use std::collections::HashSet;
 
 /// Action macro for defining service operations in Runar
 ///
@@ -14,29 +15,28 @@ use rand;
 ///
 /// # Examples
 /// ```rust
-/// // Named action
-/// #[action(name = "get_user")]
-/// async fn get_user_by_id(&self, request: ServiceRequest) -> Result<ServiceResponse, anyhow::Error> {
-///     // Implementation
-///     Ok(ServiceResponse::success("User found", Some(user_data)))
+/// // Named action with direct parameters
+/// #[action(name = "add")]
+/// async fn add(&self, a: i32, b: i32) -> Result<i32, anyhow::Error> {
+///     // Implementation directly uses a and b
+///     Ok(a + b)
 /// }
 ///
-/// // Default name from method
+/// // Action using ServiceRequest - supported for backward compatibility
 /// #[action]
-/// async fn get_posts(&self, request: ServiceRequest) -> Result<ServiceResponse, anyhow::Error> {
-///     // Implementation
-///     Ok(ServiceResponse::success("Posts retrieved", Some(posts_data)))
+/// async fn get_posts(&self, request: ServiceRequest) -> Result<Vec<Post>, anyhow::Error> {
+///     // Implementation extracts parameters from request
+///     Ok(posts)
 /// }
 /// ```
 ///
 /// # Parameter Handling
-/// The macro supports extracting parameters from the ServiceRequest:
-/// - All actions can be called with: `node.request("service/action", params)`
-/// - Parameters are accessed via `request.params`
+/// - For direct parameters: The macro extracts them from the request data automatically
+/// - For ServiceRequest parameter: Passed through as-is for backward compatibility
 ///
 /// # Return Values
-/// - Action methods should return `Result<ServiceResponse, anyhow::Error>`
-/// - Error handling is done via the `?` operator in the generated code
+/// - Action methods can return their actual data types wrapped in Result<T, anyhow::Error>
+/// - The macro automatically wraps the return value in ServiceResponse
 pub fn action(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Parse the function definition
     let input_fn = parse_macro_input!(item as ItemFn);
@@ -69,61 +69,149 @@ pub fn action(attr: TokenStream, item: TokenStream) -> TokenStream {
         ).to_compile_error().into();
     }
     
-    // Generate a unique ID for this action
-    let unique_id = rand::random::<u32>();
-    let action_id = format!("ACTION_{}", unique_id);
-    let action_ident = Ident::new(&action_id, Span::call_site());
+    // Extract parameter information
+    let params = extract_params(&input_fn.sig);
     
-    // Generate the struct name for this action's registry
-    let register_struct_name = format!("RegisterAction{}", unique_id);
-    let register_struct_ident = Ident::new(&register_struct_name, Span::call_site());
+    // Check if the method takes a ServiceRequest (legacy support)
+    let takes_service_request = params.len() == 1 && 
+        is_type_named_with_path(&params[0].ty, &["runar_node", "services", "ServiceRequest"]) ||
+        is_type_named_with_path(&params[0].ty, &["ServiceRequest"]);
     
-    // Generate the implementation
-    let vis = &input_fn.vis;
-    let sig = &input_fn.sig;
-    let block = &input_fn.block;
-    let attrs = &input_fn.attrs;
-    
-    // The new approach uses a separate struct to register the action at runtime
-    // This avoids the Self issues in static contexts
-    let output = quote! {
-        #[doc(hidden)]
-        #[allow(non_snake_case)]
-        struct #register_struct_ident;
+    // Generate the appropriate handler based on whether it uses direct parameters or ServiceRequest
+    let handler_impl = if takes_service_request {
+        // For legacy methods that directly take ServiceRequest, just pass it through
+        quote! {
+            // Create an operation handler that will be matched in handle_request
+            async fn #method_name(&self, request: runar_node::services::ServiceRequest) -> anyhow::Result<runar_node::services::ServiceResponse> {
+                // Call the original method with the request
+                match self.#method_name(request).await {
+                    Ok(result) => {
+                        // Return a success response
+                        Ok(runar_node::services::ServiceResponse::success(
+                            format!("Operation '{}' completed successfully", #operation_name),
+                            Some(runar_node::types::ValueType::Number(result as f64))
+                        ))
+                    },
+                    Err(e) => {
+                        // Return error response
+                        Ok(runar_node::services::ServiceResponse::error(
+                            format!("Operation '{}' failed: {}", #operation_name, e)
+                        ))
+                    }
+                }
+            }
+        }
+    } else {
+        // For direct parameter methods, extract parameters from request.data
         
-        impl #register_struct_ident {
-            const NAME: &'static str = #operation_name;
+        // Generate parameter extraction code
+        let param_extractions = params.iter().filter(|p| p.name != "self").map(|param| {
+            let param_name = &param.name;
+            let param_name_str = param_name.to_string();
             
-            fn register<T: 'static>() {
-                inventory::submit!(crate::registry::ActionItem {
-                    name: Self::NAME.to_string(),
-                    service_type_id: std::any::TypeId::of::<T>(),
-                });
+            quote! {
+                // Extract parameter from request data using vmap_i32! macro
+                let #param_name = runar_common::vmap_i32!(data, #param_name_str, 0);
             }
-        }
+        });
         
-        // Create an inventory item that will register on service instantiation
-        inventory::submit! {
-            // This will be registered when the inventory is first accessed
-            crate::registry::ActionRegistrar {
-                register_fn: |type_id| {
-                    // Register with the specified type ID
-                    inventory::submit!(crate::registry::ActionItem {
-                        name: #operation_name.to_string(),
-                        service_type_id: type_id,
-                    });
-                },
+        // Generate parameter list for passing to the original method
+        let param_names = params.iter()
+            .filter(|p| p.name != "self")
+            .map(|p| &p.name);
+        
+        // Generate a unique handler name to avoid conflicts
+        let handler_name = format_ident!("handle_{}", operation_name);
+        
+        quote! {
+            // Create an operation handler that will be matched in handle_request
+            async fn #handler_name(&self, request: runar_node::services::ServiceRequest) -> anyhow::Result<runar_node::services::ServiceResponse> {
+                // Extract data from request
+                let data = match &request.data {
+                    Some(data) => data,
+                    None => {
+                        return Ok(runar_node::services::ServiceResponse::error(
+                            format!("Missing request data for operation '{}'", #operation_name)
+                        ));
+                    }
+                };
+                
+                // Extract parameters from data
+                #(#param_extractions)*
+                
+                // Call the original method with extracted parameters
+                match self.#method_name(#(#param_names),*).await {
+                    Ok(result) => {
+                        // Return a success response
+                        Ok(runar_node::services::ServiceResponse::success(
+                            format!("Operation '{}' completed successfully", #operation_name),
+                            Some(runar_node::types::ValueType::Number(result as f64))
+                        ))
+                    },
+                    Err(e) => {
+                        // Return error response
+                        Ok(runar_node::services::ServiceResponse::error(
+                            format!("Operation '{}' failed: {}", #operation_name, e)
+                        ))
+                    }
+                }
             }
-        }
-        
-        // Keep the original attributes and function
-        #(#attrs)*
-        #vis #sig {
-            #block
         }
     };
     
+    // Generate the final implementation
+    let output = quote! {
+        // Keep the original method
+        #input_fn
+        
+        // Generate the operation handler
+        #handler_impl
+    };
+    
     TokenStream::from(output)
+}
+
+/// Struct to collect parameter information
+struct ParamInfo {
+    name: Ident,
+    ty: Type,
+}
+
+/// Extract parameter information from a function signature
+fn extract_params(sig: &syn::Signature) -> Vec<ParamInfo> {
+    sig.inputs
+        .iter()
+        .filter_map(|arg| {
+            if let FnArg::Typed(PatType { pat, ty, .. }) = arg {
+                if let syn::Pat::Ident(pat_ident) = &**pat {
+                    Some(ParamInfo {
+                        name: pat_ident.ident.clone(),
+                        ty: (*ty.clone()),
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Check if a type is named a certain way with a specific path
+fn is_type_named_with_path(ty: &Type, path_segments: &[&str]) -> bool {
+    if let Type::Path(TypePath { path, .. }) = ty {
+        if path.segments.len() == path_segments.len() {
+            return path.segments.iter().zip(path_segments.iter())
+                .all(|(seg, &name)| seg.ident == name);
+        } else if let Some(last_segment) = path_segments.last() {
+            // If the path isn't fully qualified, check just the last segment
+            if let Some(last_path_segment) = path.segments.last() {
+                return &last_path_segment.ident.to_string() == *last_segment;
+            }
+        }
+    }
+    false
 }
 
 /// Check if the return type is Result<ServiceResponse>
