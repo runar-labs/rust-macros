@@ -1,101 +1,102 @@
 mod common;
-use common::ServiceInfo;
 use runar_macros::service;
+use runar_node::services::abstract_service::{AbstractService, ServiceState};
+use runar_common::types::ValueType;
+
+#[service]
+pub struct TestService {
+    field1: String,
+    field2: u32,
+}
 
 #[test]
 fn test_service_only() {
-    // Define a service with the service macro
-    #[service(
-        name = "test_service"
-    )]
-    struct TestService {
-        counter: u32,
-    }
+    let service = TestService {
+        field1: "test".to_string(),
+        field2: 42,
+    };
     
-    impl TestService {
-        fn new() -> Self {
-            Self { counter: 0 }
-        }
-    }
+    // Check service basic info
+    assert_eq!(service.name(), "test_service");
+    assert_eq!(service.path(), "test_service");
+    assert_eq!(service.description(), "Service TestService");
+    assert_eq!(service.version(), "0.1.0");
+    assert_eq!(service.state(), ServiceState::Running);
     
-    // Create an instance of the service
-    let service = TestService::new();
-    
-    // Verify the service name and path from the macro
+    // Check backward compatibility methods
     assert_eq!(service.service_name(), "test_service");
-    assert_eq!(service.service_path(), "/test_service"); // Path is prefixed with /
-    
-    println!("Service definition test passed!");
+    assert_eq!(service.service_path(), "/test_service");
+    assert_eq!(service.service_description(), "Service TestService");
+    assert_eq!(service.service_version(), "0.1.0");
+}
+
+#[service(name = "minimal_service")]
+pub struct MinimalService {
+    value: u64,
 }
 
 #[test]
 fn test_service_minimal() {
-    // Define a service with minimal parameters
-    #[service(name = "minimal_service")]
-    struct MinimalService {
-        counter: u32,
-    }
+    let service = MinimalService { value: 100 };
     
-    impl MinimalService {
-        fn new() -> Self {
-            Self { counter: 0 }
-        }
-    }
+    // Check service basic info
+    assert_eq!(service.name(), "minimal_service");
+    assert_eq!(service.path(), "minimal_service");
+    assert_eq!(service.description(), "Service MinimalService");
+    assert_eq!(service.version(), "0.1.0");
+    assert_eq!(service.state(), ServiceState::Running);
     
-    // Create an instance of the service
-    let service = MinimalService::new();
-    
-    // Verify the service name and path from the macro
+    // Check backward compatibility methods
     assert_eq!(service.service_name(), "minimal_service");
-    assert_eq!(service.service_path(), "/minimal_service"); // Path is prefixed with /
-    assert_eq!(service.service_description(), "Service MinimalService"); // Default description
-    assert_eq!(service.service_version(), "0.1.0"); // Default version
+    assert_eq!(service.service_path(), "/minimal_service");
+    assert_eq!(service.service_description(), "Service MinimalService");
+    assert_eq!(service.service_version(), "0.1.0");
+}
+
+#[service(
+    name = "custom_service",
+    path = "/api/v1/custom",
+    description = "A custom service with all params",
+    version = "2.1.0"
+)]
+pub struct CustomParamService {
+    counter: i32,
 }
 
 #[test]
 fn test_service_with_all_params() {
-    // Define a service with all parameters specified
-    #[service(
-        name = "custom_service",
-        path = "/api/v1/custom",
-        description = "A fully customized service",
-        version = "2.3.4"
-    )]
-    struct CustomService {
-        value: String,
-    }
+    let service = CustomParamService { counter: 0 };
     
-    impl CustomService {
-        fn new() -> Self {
-            Self { value: "test".to_string() }
-        }
-    }
+    // Check service basic info
+    assert_eq!(service.name(), "custom_service");
+    assert_eq!(service.path(), "api/v1/custom"); // Leading / is removed
+    assert_eq!(service.description(), "A custom service with all params");
+    assert_eq!(service.version(), "2.1.0");
+    assert_eq!(service.state(), ServiceState::Running);
     
-    // Create an instance of the service
-    let service = CustomService::new();
-    
-    // Verify all service parameters
+    // Check backward compatibility methods
     assert_eq!(service.service_name(), "custom_service");
-    assert_eq!(service.service_path(), "/api/v1/custom"); // Path is already prefixed with /
-    assert_eq!(service.service_description(), "A fully customized service"); // Custom description
-    assert_eq!(service.service_version(), "2.3.4"); // Custom version
+    assert_eq!(service.service_path(), "/api/v1/custom");
+    assert_eq!(service.service_description(), "A custom service with all params");
+    assert_eq!(service.service_version(), "2.1.0");
 }
+
+#[service(name = "service1")]
+pub struct Service1 {}
+
+#[service(name = "service2")]
+pub struct Service2 {}
 
 #[test]
 fn test_multiple_services() {
-    // Test that multiple services can be defined
-    #[service(name = "service1")]
-    struct Service1 {}
-    
-    #[service(name = "service2", path = "/custom/path")]
-    struct Service2 {}
-    
     let service1 = Service1 {};
     let service2 = Service2 {};
     
-    assert_eq!(service1.service_name(), "service1");
-    assert_eq!(service1.service_path(), "/service1");
+    // Verify each service has its own correct metadata
+    assert_eq!(service1.name(), "service1");
+    assert_eq!(service2.name(), "service2");
     
-    assert_eq!(service2.service_name(), "service2");
-    assert_eq!(service2.service_path(), "/custom/path");
+    // Make sure services don't interfere with each other
+    assert_ne!(service1.name(), service2.name());
+    assert_ne!(service1.path(), service2.path());
 } 

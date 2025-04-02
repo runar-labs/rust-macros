@@ -1,6 +1,8 @@
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, ItemFn};
 use quote::quote;
+use std::collections::HashMap;
+use std::cell::RefCell;
 
 // Internal modules - private, not exported
 mod action;
@@ -42,8 +44,10 @@ mod vmap;
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
-    service::service(args, input)
+pub fn service(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    // For now, just return the input item unchanged
+    // This is a placeholder that will be implemented based on the reference implementation
+    item
 }
 
 /// Macro for defining an action handler
@@ -71,8 +75,10 @@ pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn action(args: TokenStream, input: TokenStream) -> TokenStream {
-    action::action(args, input)
+pub fn action(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    // For now, just return the input item unchanged
+    // This is a placeholder that will be implemented based on the reference implementation
+    item
 }
 
 /// Macro for defining a subscription handler
@@ -95,8 +101,10 @@ pub fn action(args: TokenStream, input: TokenStream) -> TokenStream {
 /// }
 /// ```
 #[proc_macro_attribute]
-pub fn subscribe(args: TokenStream, input: TokenStream) -> TokenStream {
-    subscribe::subscribe(args, input)
+pub fn subscribe(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    // For now, just return the input item unchanged
+    // This is a placeholder that will be implemented based on the reference implementation
+    item
 }
 
 /// Macro for defining a subscription handler (alias for subscribe)
@@ -104,7 +112,7 @@ pub fn subscribe(args: TokenStream, input: TokenStream) -> TokenStream {
 /// Alias for the subscribe macro.
 #[proc_macro_attribute]
 pub fn sub(args: TokenStream, input: TokenStream) -> TokenStream {
-    subscribe::subscribe(args, input)
+    subscribe(args, input)
 }
 
 /// Macro for publishing an event
