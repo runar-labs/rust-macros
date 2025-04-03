@@ -95,9 +95,14 @@ pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
         let mut new_struct = input.clone();
         if let syn::Fields::Named(ref mut fields) = new_struct.fields {
             // Add action_registry field
-            let registry_field = parse_str::<syn::Field>(
-                "pub action_registry: std::sync::Arc<std::collections::HashMap<String, ActionHandlerFn>>"
-            ).unwrap();
+            let registry_field = syn::Field {
+                attrs: vec![],
+                vis: syn::parse_quote!(pub),
+                ident: Some(syn::parse_quote!(action_registry)),
+                colon_token: Some(syn::parse_quote!(:)),
+                ty: syn::parse_quote!(std::sync::Arc<std::collections::HashMap<String, ActionHandlerFn>>),
+                mutability: syn::FieldMutability::None,
+            };
             fields.named.push(registry_field);
         }
         
