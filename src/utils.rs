@@ -291,31 +291,31 @@ where
 }
 
 /// Convert any serializable value to ValueType
-pub fn convert_to_value_type<T>(value: T) -> runar_node::ValueType
+pub fn convert_to_value_type<T>(value: T) -> runar_common::types::ValueType
 where
     T: serde::Serialize,
 {
     // Convert to JSON first
     match serde_json::to_value(value) {
-        Ok(json) => runar_node::ValueType::Json(json),
+        Ok(json) => runar_common::types::ValueType::Json(json),
         Err(e) => {
             // Log conversion error
             runar_common::utils::logging::warn_log(
                 runar_common::utils::logging::Component::Service, 
                 &format!("Failed to convert value to ValueType: {}", e)
             );
-            runar_node::ValueType::Null
+            runar_common::types::ValueType::Null
         }
     }
 }
 
 /// Convert from ValueType to a specific type
-pub fn convert_value_to_type<T>(value: runar_node::ValueType) -> Result<T, String>
+pub fn convert_value_to_type<T>(value: runar_common::types::ValueType) -> Result<T, String>
 where
     T: serde::de::DeserializeOwned,
 {
     match value {
-        runar_node::ValueType::Json(json) => {
+        runar_common::types::ValueType::Json(json) => {
             serde_json::from_value(json)
                 .map_err(|e| format!("Failed to convert value: {}", e))
         },
