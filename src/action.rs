@@ -1,9 +1,6 @@
 // Action Macro Implementation
 // Following the fresh approach per macro_implementation_plan.md
 
-use proc_macro::TokenStream;
-use quote::quote;
-use syn::{parse_macro_input, ItemFn};
 
 /// Debug utility to print the token stream during macro expansion
 #[cfg(feature = "debug")]
