@@ -231,19 +231,19 @@ pub fn is_service_response_type(ty: &syn::Type) -> bool {
 
 /// Helper function to extract value from a parameter map
 pub fn extract_parameter<T, S>(
-    params: &runar_common::types::ValueType,
+    params: &runar_common::types::ArcValueType,
     name: S,
     error_msg: &str
 ) -> anyhow::Result<T>
 where
     S: AsRef<str>,
-    T: TryFrom<runar_common::types::ValueType> + Default,
+    T: TryFrom<runar_common::types::ArcValueType> + Default,
     T::Error: std::fmt::Debug,
 {
     let name_ref = name.as_ref();
     match params {
         // If params is a Map, try to get the parameter by name
-        runar_common::types::ValueType::Map(map) => {
+        runar_common::types::ArcValueType::Map(map) => {
             // Look for the parameter in the map
             if let Some(value) = map.get(name_ref) {
                 // Try to convert the value to the requested type
@@ -269,15 +269,15 @@ where
 
 /// Alternative version of extract_parameter for use in non-macro context
 pub fn extract_param<T>(
-    params: &runar_common::types::ValueType,
+    params: &runar_common::types::ArcValueType,
     name: &str,
 ) -> anyhow::Result<T>
 where
-    T: TryFrom<runar_common::types::ValueType>,
-    <T as TryFrom<runar_common::types::ValueType>>::Error: std::fmt::Display,
+    T: TryFrom<runar_common::types::ArcValueType>,
+    <T as TryFrom<runar_common::types::ArcValueType>>::Error: std::fmt::Display,
 {
     match params {
-        runar_common::types::ValueType::Map(map) => {
+        runar_common::types::ArcValueType::Map(map) => {
             if let Some(value) = map.get(name) {
                 T::try_from(value.clone()).map_err(|err| {
                     anyhow::anyhow!("Failed to convert parameter '{}': {}", name, err)
@@ -291,31 +291,31 @@ where
 }
 
 /// Convert any serializable value to ValueType
-pub fn convert_to_value_type<T>(value: T) -> runar_common::types::ValueType
+pub fn convert_to_value_type<T>(value: T) -> runar_common::types::ArcValueType
 where
     T: serde::Serialize,
 {
     // Convert to JSON first
     match serde_json::to_value(value) {
-        Ok(json) => runar_common::types::ValueType::Json(json),
+        Ok(json) => runar_common::types::ArcValueType::Json(json),
         Err(e) => {
             // Log conversion error
             runar_common::utils::logging::warn_log(
                 runar_common::utils::logging::Component::Service, 
                 &format!("Failed to convert value to ValueType: {}", e)
             );
-            runar_common::types::ValueType::Null
+            runar_common::types::ArcValueType::Null
         }
     }
 }
 
 /// Convert from ValueType to a specific type
-pub fn convert_value_to_type<T>(value: runar_common::types::ValueType) -> Result<T, String>
+pub fn convert_value_to_type<T>(value: runar_common::types::ArcValueType) -> Result<T, String>
 where
     T: serde::de::DeserializeOwned,
 {
     match value {
-        runar_common::types::ValueType::Json(json) => {
+        runar_common::types::ArcValueType::Json(json) => {
             serde_json::from_value(json)
                 .map_err(|e| format!("Failed to convert value: {}", e))
         },
