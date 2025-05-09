@@ -13,7 +13,7 @@ proc-macro = true
 [features]
 default = ["node_implementation"]
 node_implementation = ["runar_node", "tokio"]
-distributed_slice = ["node_implementation", "dep:linkme"]
+distributed_slice = ["node_implementation", "linkme"]
 
 [dependencies]
 proc-macro2 = "1.0"
