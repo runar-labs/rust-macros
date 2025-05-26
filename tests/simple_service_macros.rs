@@ -11,8 +11,14 @@ use std::sync::{Arc, Mutex};
 
 // Define a simple math service
 pub struct TestMathService {
-    // Service-specific fields
-    counter: Arc<Mutex<i32>>,
+    // Empty struct for testing
+}
+
+// Implement Clone manually for TestMathService
+impl Clone for TestMathService {
+    fn clone(&self) -> Self {
+        Self {}
+    }
 }
 
 #[service]
@@ -21,9 +27,7 @@ impl TestMathService {
     // Define an action using the action macro
     #[action]
     async fn add(&self, a_param: f64, b_param: f64, ctx: &RequestContext) -> Result<f64> {
-        // Increment the counter
-        let mut counter = self.counter.lock().unwrap();
-        *counter += 1;
+ 
 
         // Log using the context
         ctx.debug(format!("Adding {} + {}", a_param, b_param));
@@ -35,10 +39,7 @@ impl TestMathService {
     // Define another action
     #[action]
     async fn subtract(&self, a_param: f64, b_param: f64, ctx: &RequestContext) -> Result<f64> {
-        // Increment the counter
-        let mut counter = self.counter.lock().unwrap();
-        *counter += 1;
-
+        
         // Log using the context
         ctx.debug(format!("Subtracting {} - {}", a_param, b_param));
 
@@ -49,10 +50,7 @@ impl TestMathService {
     // Define an action with a custom name
     #[action("multiply_numbers")]
     async fn multiply(&self, a_param: f64, b_param: f64, ctx: &RequestContext) -> Result<f64> {
-        // Increment the counter
-        let mut counter = self.counter.lock().unwrap();
-        *counter += 1;
-
+ 
         // Log using the context
         ctx.debug(format!("Multiplying {} * {}", a_param, b_param));
 
@@ -63,10 +61,7 @@ impl TestMathService {
     // Define an action that can fail
     #[action]
     async fn divide(&self, a_param: f64, b_param: f64, ctx: &RequestContext) -> Result<f64> {
-        // Increment the counter
-        let mut counter = self.counter.lock().unwrap();
-        *counter += 1;
-
+ 
         // Log using the context
         ctx.debug(format!("Dividing {} / {}", a_param, b_param));
 
@@ -79,11 +74,7 @@ impl TestMathService {
         // Return the result
         Ok(a_param / b_param)
     }
-
-    // Method to get the current counter value
-    pub fn get_counter(&self) -> i32 {
-        *self.counter.lock().unwrap()
-    }
+ 
 }
 
 #[cfg(test)]
@@ -101,7 +92,7 @@ mod tests {
         let mut node = Node::new(config).await.unwrap();
 
         // Create a test math service
-        let service = TestMathService::new("Math", "math");
+        let service = TestMathService{};
 
         // Add the service to the node
         node.add_service(service).await.unwrap();
