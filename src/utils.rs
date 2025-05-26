@@ -1,233 +1,83 @@
-use proc_macro2::TokenStream;
+// Utility functions for the macro implementations
+//
+// This module provides utility functions for parsing and generating code
+// for the service and action macros.
+
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
-use syn::{Attribute, Ident, Path, Meta};
+use syn::{Attribute, Lit, Meta, Path};
 
-/// Resolves a crate name for use in macro-generated code.
-/// This function attempts to find the crate with the given name in the current scope.
-/// If the crate is not found, it returns the original name.
-pub fn get_crate_name(name: &str) -> TokenStream {
-    // For simplicity, we'll just return the crate name directly
-    // In a more sophisticated implementation, this would check if the crate
-    // is available in the current scope and handle aliasing
-    let ident = Ident::new(name, proc_macro2::Span::call_site());
-    quote! { #ident }
-}
-
-/// Parses a path string into a syn::Path
-pub fn parse_path(path_str: &str) -> syn::Result<Path> {
-    syn::parse_str::<Path>(path_str)
-}
-
-/// Extracts the last segment of a path
-pub fn get_last_path_segment(path: &Path) -> Option<&Ident> {
-    path.segments.last().map(|segment| &segment.ident)
-}
-
-/// Checks if a function is async
-pub fn is_async_fn(item_fn: &syn::ItemFn) -> bool {
-    item_fn.sig.asyncness.is_some()
-}
-
-/// Generates a unique identifier based on the input
-pub fn generate_unique_ident(base: &str) -> Ident {
-    let unique_suffix = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    
-    Ident::new(
-        &format!("{}_{}", base, unique_suffix),
-        proc_macro2::Span::call_site()
-    )
-}
-
-/// Converts a string to snake_case
-pub fn to_snake_case(s: &str) -> String {
-    let mut result = String::new();
-    let mut prev_is_upper = false;
-    
-    for (i, c) in s.char_indices() {
-        if c.is_uppercase() {
-            if i > 0 && !prev_is_upper {
-                result.push('_');
-            }
-            result.push(c.to_lowercase().next().unwrap());
-            prev_is_upper = true;
-        } else {
-            result.push(c);
-            prev_is_upper = false;
-        }
-    }
-    
-    result
-}
-
-/// Extract an attribute value as a string
-pub fn get_attribute_value(attrs: &[Attribute], name: &str) -> Option<String> {
+/// Extract a string value from an attribute
+pub fn extract_string_from_attribute(attrs: &[Attribute], path_segments: &[&str]) -> Option<String> {
     for attr in attrs {
-        if !attr.path().is_ident(name) {
-            continue;
-        }
-        
-        // Parse the attribute
-        let mut result = None;
-        
-        // Try to extract the value
-        let _ = attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("value") {
-                let _ = meta.parse_nested_meta(|nested| {
-                    if let Ok(lit) = nested.value() {
-                        if let Ok(s) = lit.parse::<syn::LitStr>() {
-                            result = Some(s.value());
-                        }
+        if path_matches(&attr.path(), path_segments) {
+            // Use parse_args instead of parse_meta, which is deprecated in syn 2.0
+            let meta = attr.meta.clone();
+            if let Meta::NameValue(name_value) = meta {
+                if let syn::Expr::Lit(expr_lit) = name_value.value {
+                    if let Lit::Str(lit_str) = expr_lit.lit {
+                        return Some(lit_str.value());
                     }
-                    Ok(())
-                });
+                }
             }
-            Ok(())
-        });
-        
-        if result.is_some() {
-            return result;
         }
     }
-    
     None
 }
 
-/// Parse a comma-separated string into a vector of strings
-pub fn parse_comma_separated(s: &str) -> Vec<String> {
-    s.split(',')
-        .map(|part| part.trim().to_string())
-        .filter(|part| !part.is_empty())
+/// Check if a path matches the given segments
+pub fn path_matches(path: &Path, segments: &[&str]) -> bool {
+    if path.segments.len() != segments.len() {
+        return false;
+    }
+
+    path.segments
+        .iter()
+        .zip(segments.iter())
+        .all(|(seg, &expected)| seg.ident == expected)
+}
+
+/// Generate a handler function name from an action name
+pub fn generate_handler_name(action_name: &str) -> syn::Ident {
+    syn::Ident::new(&format!("handle_{}", action_name), Span::call_site())
+}
+
+/// Generate a unique identifier for a function
+pub fn generate_unique_id() -> String {
+    use rand::{distributions::Alphanumeric, Rng};
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(10)
+        .map(char::from)
         .collect()
 }
 
-/// Extract a name-value pair from attribute arguments
-pub fn get_name_value_from_args(args: &[syn::Meta]) -> Option<(String, String)> {
-    for arg in args {
-        if let Meta::NameValue(name_value) = arg {
-            if let Some(ident) = name_value.path.get_ident() {
-                if let syn::Expr::Lit(expr_lit) = &name_value.value {
-                    if let syn::Lit::Str(lit_str) = &expr_lit.lit {
-                        return Some((ident.to_string(), lit_str.value()));
-                    }
+/// Generate code to extract a parameter from a request
+pub fn generate_param_extraction(
+    param_name: &syn::Ident,
+    param_type: &syn::Type,
+    index: usize,
+    action_name: &str,
+) -> TokenStream2 {
+    quote! {
+        let #param_name: #param_type = match params.as_ref().and_then(|p| p.get(#index)) {
+            Some(value) => match value.as_type() {
+                Ok(val) => val,
+                Err(_) => {
+                    context.error(format!("Failed to parse parameter {} for action {}", #index, #action_name));
+                    return Ok(runar_node::services::ServiceResponse::error(
+                        400,
+                        &format!("Invalid parameter type for parameter {}", #index),
+                    ));
                 }
+            },
+            None => {
+                context.error(format!("Missing parameter {} for action {}", #index, #action_name));
+                return Ok(runar_node::services::ServiceResponse::error(
+                    400,
+                    &format!("Missing parameter {}", #index),
+                ));
             }
-        }
-    }
-    None
-}
-
-/// Extract a name from attribute arguments
-pub fn get_name_from_args(args: &[syn::Meta]) -> Option<String> {
-    for arg in args {
-        if let Meta::Path(path) = arg {
-            if let Some(ident) = path.get_ident() {
-                return Some(ident.to_string());
-            }
-        }
-    }
-    None
-}
-
-/// Parse attribute meta data into name-value pairs
-pub fn parse_meta_args(meta: &syn::Meta) -> Vec<syn::Meta> {
-    match meta {
-        syn::Meta::List(meta_list) => {
-            let parsed_metas = meta_list.tokens.clone().into_iter()
-                .filter_map(|token| {
-                    if let proc_macro2::TokenTree::Group(group) = &token {
-                        syn::parse2::<syn::Meta>(group.stream()).ok()
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>();
-            
-            parsed_metas
-        }
-        _ => Vec::new(),
+        };
     }
 }
-
-/// Extract name-value pairs from attribute arguments
-pub fn extract_name_value_pairs(args: &[syn::Meta]) -> std::collections::HashMap<String, String> {
-    let mut pairs = std::collections::HashMap::new();
-    
-    for meta in args {
-        if let syn::Meta::NameValue(name_value) = meta {
-            // Get the path as a string (the name part)
-            let name = name_value.path.get_ident()
-                .map(|ident| ident.to_string())
-                .unwrap_or_default();
-            
-            // Get the value part
-            if let syn::Expr::Lit(expr_lit) = &name_value.value {
-                if let syn::Lit::Str(lit_str) = &expr_lit.lit {
-                    let value = lit_str.value();
-                    pairs.insert(name, value);
-                }
-            }
-        }
-    }
-    
-    pairs
-}
-
-/// Check if a type is a string reference (&str)
-pub fn is_str_reference(ty: &syn::Type) -> bool {
-    if let syn::Type::Reference(type_ref) = ty {
-        if let syn::Type::Path(type_path) = &*type_ref.elem {
-            if type_path.path.segments.len() == 1 {
-                return type_path.path.segments[0].ident == "str";
-            }
-        }
-    }
-    false
-}
-
-/// Checks if a type path is an i32
-pub fn is_i32_type(type_path: &syn::TypePath) -> bool {
-    if type_path.path.segments.len() == 1 {
-        return type_path.path.segments[0].ident == "i32";
-    }
-    false
-}
-
-/// Checks if a type path is an f64
-pub fn is_f64_type(type_path: &syn::TypePath) -> bool {
-    if type_path.path.segments.len() == 1 {
-        return type_path.path.segments[0].ident == "f64";
-    }
-    false
-}
-
-/// Checks if a type path is a bool
-pub fn is_bool_type(type_path: &syn::TypePath) -> bool {
-    if type_path.path.segments.len() == 1 {
-        return type_path.path.segments[0].ident == "bool";
-    }
-    false
-}
-
-/// Checks if a type is a Result<ServiceResponse>
-pub fn is_service_response_type(ty: &syn::Type) -> bool {
-    if let syn::Type::Path(type_path) = ty {
-        if type_path.path.segments.len() == 1 && type_path.path.segments[0].ident == "Result" {
-            if let syn::PathArguments::AngleBracketed(args) = &type_path.path.segments[0].arguments {
-                if args.args.len() == 1 {
-                    if let syn::GenericArgument::Type(syn::Type::Path(inner_path)) = &args.args[0] {
-                        if inner_path.path.segments.len() == 1 {
-                            return inner_path.path.segments[0].ident == "ServiceResponse";
-                        }
-                    }
-                }
-            }
-        }
-    }
-    false
-}
-
-
- 

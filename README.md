@@ -2,59 +2,66 @@
 
 This crate provides procedural macros for the Runar Node system, making it easier to define services, actions, and handle events.
 
-> **Development Status**: The macros are fully functional and support both compile-time and runtime registration approaches. All tests now pass, including comprehensive end-to-end tests that validate the entire service lifecycle.
+## Service Macro
+The `service` macro automatically implements the `AbstractService` trait for a struct, generating the required lifecycle methods and handling action registration. It follows the architectural principle of clear service boundaries with well-defined interfaces.
 
-## Implementation Approaches
+### INTENTION
+Simplify service implementation by automating boilerplate code while maintaining architectural boundaries and ensuring proper documentation.
 
-Runar macros support two implementation approaches:
-
-1. **Distributed Slices (Compile-time)**: Using the `linkme` crate to register handlers, actions, and subscriptions at compile time. This approach is more efficient but requires the unstable `#[used(linker)]` attribute.
-
-2. **Runtime Registration (Default)**: A fallback mechanism that registers handlers, actions, and subscriptions at runtime. This approach is used when the `distributed_slice` feature is not enabled, making it compatible with stable Rust and testing environments.
-
-> **Testing**: The runtime registration approach enables testing without requiring unstable Rust features. Simply run your tests without enabling the `linkme` feature, and macros will automatically use runtime registration.
-
-## Available Macros
-
-### Service Macro
-The `service` macro is used to define a Runar service by implementing the `AbstractService` trait.
+### Usage
 
 ```rust
-#[service(
-    name = "example_service", // required
-    // Optional parameters with defaults:
-    // path = "example_service", (defaults to name value)
-    // description = "ExampleService service", (defaults to struct name + "service")
-    // version = "1.0.0" (defaults to "1.0.0")
-)]
-struct ExampleService {
-    // Service fields
+#[service]
+pub struct MathService {
+    // Required fields for AbstractService
+    name: String,
+    path: String,
+    version: String,
+    description: String,
+    network_id: Option<String>,
+    
+    // Service-specific fields
+    counter: Arc<Mutex<i32>>,
 }
 ```
 
-### Action Macro
-The `action` macro designates a method as a service action that can be invoked through the node's request system.
+The macro will:
+1. Implement the `AbstractService` trait
+2. Generate `Clone` implementation if not present
+3. Create the `init()`, `start()`, and `stop()` methods
+4. Set up the action registration infrastructure
+
+## Action Macro
+
+The `action` macro marks methods as actions to be registered during service initialization. It follows the architectural principle of request-based communication with clear API interfaces.
+
+### INTENTION
+Simplify action implementation by automating parameter extraction, error handling, and action registration while maintaining proper context usage.
+
+### Usage
 
 ```rust
+// Basic action with default name (same as method name)
 #[action]
-async fn my_action(&self, param: String) -> Result<ServiceResponse> {
-    // Handle the action
-    Ok(ServiceResponse::success("Action completed", None))
+async fn add(&self, a: f64, b: f64, ctx: &RequestContext) -> Result<f64> {
+    // Implementation with proper context usage for logging
+    ctx.debug(format!("Adding {} + {}", a, b));
+    Ok(a + b)
+}
+
+// Action with custom name
+#[action("multiply_numbers")]
+async fn multiply(&self, a: f64, b: f64, ctx: &RequestContext) -> Result<f64> {
+    ctx.debug(format!("Multiplying {} * {}", a, b));
+    Ok(a * b)
 }
 ```
 
-### Action Macro (Generic)
-The `action` macro can also be used without a specific name to implement generic request handling logic that delegates to appropriate action methods.
-
-```rust
-#[action]
-async fn process_request(&self, context: &RequestContext, operation: &str, params: &ValueType) -> Result<ServiceResponse> {
-    match operation {
-        "my_action" => self.my_action(params["param"].as_str().unwrap_or_default().to_string()).await,
-        _ => Ok(ServiceResponse::error(format!("Unknown operation: {}", operation), None)),
-    }
-}
-```
+The macro will:
+1. Generate a handler function that extracts parameters from the request
+2. Properly handle errors and convert them to appropriate responses
+3. Register the action during service initialization
+4. Ensure proper context usage for logging and error reporting
 
 ### Event Macros
 The `publish` and `subscribe` macros simplify event-based communication.
@@ -62,95 +69,165 @@ The `publish` and `subscribe` macros simplify event-based communication.
 ```rust
 // Subscribe to events
 #[subscribe("example_topic")]
-async fn handle_event(&mut self, context: &RequestContext, payload: ValueType) -> Result<()> {
+async fn on_example_topic(&mut self, context: &RequestContext, payload: ArcValueType) -> Result<()> {
     // Handle event
     Ok(())
 }
 
-// Publish events
+// Publish events - onmy make sense when combined with action macro - it will fire an event with the result of the action
+#[action]
 #[publish("example_topic")]
-async fn publish_event(event: EventData) -> Result<()> {
+async fn example_topic_action(&self, context: &RequestContext, a: f64, b: f64) -> f64 {
     // Event will be published to the topic
-    Ok(())
+    a * b
 }
 ```
 
-## Testing with Macros
+## Implementation Example
 
-When writing tests that use macros, you don't need to enable the `distributed_slice` feature. The macros automatically use the runtime registration approach in test environments, ensuring your tests can run without requiring unstable Rust features.
+Here's a complete example showing how to use the service and action macros together to create a fully functional math service:
+
+```rust
+use anyhow::Result;
+use runar_common::types::ArcValueType;
+use runar_macros::{action, service};
+use runar_node::services::{LifecycleContext, RequestContext, ServiceResponse};
+use std::sync::{Arc, Mutex};
+
+// Define a math service using the service macro
+#[service]
+pub struct MathService {
+    // Required fields for AbstractService
+    name: String,
+    path: String,
+    version: String,
+    description: String,
+    network_id: Option<String>,
+    
+    // Service-specific fields
+    counter: Arc<Mutex<i32>>,
+}
+
+impl MathService {
+    // Constructor following the single primary constructor principle
+    pub fn new(name: &str, path: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            path: path.to_string(),
+            version: "1.0.0".to_string(),
+            description: "Math service".to_string(),
+            network_id: None,
+            counter: Arc::new(Mutex::new(0)),
+        }
+    }
+
+    // Define an action using the action macro
+    #[action]
+    async fn add(&self, a: f64, b: f64, ctx: &RequestContext) -> Result<f64> {
+        // Increment the counter
+        let mut counter = self.counter.lock().unwrap();
+        *counter += 1;
+
+        // Log using the context
+        ctx.debug(format!("Adding {} + {}", a, b));
+
+        // Return the result
+        Ok(a + b)
+    }
+
+    // Define another action with a custom name
+    #[action("multiply_numbers")]
+    async fn multiply(&self, a: f64, b: f64, ctx: &RequestContext) -> Result<f64> {
+        // Increment the counter
+        let mut counter = self.counter.lock().unwrap();
+        *counter += 1;
+
+        // Log using the context
+        ctx.debug(format!("Multiplying {} * {}", a, b));
+
+        // Return the result
+        Ok(a * b)
+    }
+
+    // Method to get the current counter value
+    pub fn get_counter(&self) -> i32 {
+        *self.counter.lock().unwrap()
+    }
+}
+```
+
+## Testing the Implementation
+
+Here's how to test the service and action macros in a real-world scenario:
 
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runar_macros::{service, action};
-    use runar_node::test_utils::TestNode;
-    
-    #[service(name = "test_service")]
-    struct TestService {}
-    
-    impl TestService {
-        #[action]
-        async fn test_action(&self) -> Result<ServiceResponse> {
-            // Test implementation
-            Ok(ServiceResponse::success("Test successful", None))
-        }
-    }
-    
+    use runar_node::Node;
+    use runar_node::NodeConfig;
+    use tokio::time::timeout;
+    use std::time::Duration;
+
     #[tokio::test]
-    async fn test_service_macro() {
-        let mut node = TestNode::new();
-        let service = TestService {};
-        
-        // The service and action are registered at runtime
-        node.register_service(service).await.unwrap();
-        
-        // Test the service
-        let response = node.request("test_service/test_action", json!({})).await.unwrap();
-        assert_eq!(response.status, ResponseStatus::Success);
+    async fn test_math_service() {
+        // Create a node with a test network ID
+        let mut config = NodeConfig::new("test-node", "test_network");
+        // Disable networking for testing
+        config.network_config = None;
+        let mut node = Node::new(config).await.unwrap();
+
+        // Create a test math service
+        let service = MathService::new("Math", "math");
+
+        // Add the service to the node
+        node.add_service(service).await.unwrap();
+
+        // Start the node to initialize all services
+        node.start().await.unwrap();
+
+        // Make a request to the add action
+        let params = ArcValueType::new_array(vec![
+            ArcValueType::new_primitive(5.0f64),
+            ArcValueType::new_primitive(3.0f64),
+        ]);
+
+        let response = timeout(
+            Duration::from_secs(5),
+            node.request_action("math", "add", Some(params)),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        // Verify the response
+        assert_eq!(response.status, 200);
+        assert_eq!(
+            response.data.unwrap().as_type::<f64>().unwrap(),
+            8.0
+        );
+
+        // Make a request to the multiply action (with custom name)
+        let params = ArcValueType::new_array(vec![
+            ArcValueType::new_primitive(5.0f64),
+            ArcValueType::new_primitive(3.0f64),
+        ]);
+
+        let response = timeout(
+            Duration::from_secs(5),
+            node.request_action("math", "multiply_numbers", Some(params)),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        // Verify the response
+        assert_eq!(response.status, 200);
+        assert_eq!(
+            response.data.unwrap().as_type::<f64>().unwrap(),
+            15.0
+        );
     }
 }
 ```
-
-## Basic Example
-
-```rust
-use runar_macros::{service, action, process};
-use runar_node::services::{ServiceResponse, RequestContext, ValueType};
-use anyhow::Result;
-
-#[service(
-    name = "counter_service",
-    path = "counter",
-    description = "A simple counter service"
-)]
-struct CounterService {
-    value: std::sync::atomic::AtomicU64,
-}
-
-impl CounterService {
-    fn new() -> Self {
-        Self {
-            value: std::sync::atomic::AtomicU64::new(0),
-        }
-    }
-    
-    #[action]
-    async fn increment(&self) -> Result<ServiceResponse> {
-        let value = self.value.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        Ok(ServiceResponse::success("Counter incremented", Some(ValueType::Number((value + 1) as f64))))
-    }
-    
-    #[action]
-    async fn process_request(&self, context: &RequestContext, operation: &str, params: &ValueType) -> Result<ServiceResponse> {
-        match operation {
-            "increment" => self.increment().await,
-            _ => Ok(ServiceResponse::error(format!("Unknown operation: {}", operation), None)),
-        }
-    }
-}
-```
-
-## Documentation
-
-For more detailed documentation and advanced examples, see the [Macros Documentation](../docs/development/macros.md).
+ 

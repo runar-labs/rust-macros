@@ -33,6 +33,7 @@ ctor = "0.1"
 runar_node = { path = "../rust-node", optional = true }
 linkme = { version = "0.3", optional = true }
 anyhow = "1.0"
+futures = "0.3.31"
 
 [dev-dependencies]
 anyhow = "1.0"
