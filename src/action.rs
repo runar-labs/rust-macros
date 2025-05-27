@@ -237,7 +237,7 @@ fn generate_register_action_method(
     
     quote! {
         async fn #register_method_name(&self, context: &runar_node::services::LifecycleContext) -> anyhow::Result<()> {
-            context.info(format!("Registering '{}' action", #action_name));
+            context.logger.info(format!("Registering '{}' action", #action_name));
             
             // Create a clone of self that can be moved into the closure
             let self_clone = self.clone();
@@ -292,12 +292,15 @@ fn generate_register_action_method(
             // If this action returns a type that needs registration with the serializer,
             // we would register it here
             if #needs_registration {
-                context.info(format!("Type registration needed for action '{}' with type: {}", #action_name, #type_name));
+                context.logger.debug(format!("Type registration needed for action '{}' with type: {}", #action_name, #type_name));
                 // The actual registration logic would depend on the service's serializer API
             }
             
             // Register the action handler with the configured path
-            context.register_action(#action_path, handler).await
+            context.register_action(
+                #action_path.to_string(),
+                handler
+            ).await
         }
     }
 }

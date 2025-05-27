@@ -7,6 +7,7 @@ extern crate proc_macro;
 
 mod service;
 mod action;
+mod subscribe;
 mod utils;
 
 use proc_macro::TokenStream;
@@ -48,4 +49,25 @@ pub fn service(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn action(attr: TokenStream, item: TokenStream) -> TokenStream {
     action::action_macro(attr, item)
+}
+
+/// Macro for implementing a Runar event subscription
+///
+/// This macro simplifies the implementation of an event subscription by:
+/// 1. Marking a method as an event handler to be registered during service initialization
+/// 2. Generating the necessary handler code for parameter extraction
+///
+/// # Example
+///
+/// ```rust
+/// #[subscribe(path="service/event_name")]
+/// async fn on_event(&self, data: MyEventData, ctx: &RequestContext) -> Result<()> {
+///     // Handle the event
+///     ctx.debug(format!("Event received: {}", data.message));
+///     Ok(())
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn subscribe(attr: TokenStream, item: TokenStream) -> TokenStream {
+    subscribe::subscribe_macro(attr, item)
 }

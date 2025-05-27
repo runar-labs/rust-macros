@@ -5,10 +5,10 @@
 
 use anyhow::Result;
 use runar_common::types::ArcValueType;
-use runar_macros::{action, service};
-use runar_node::services::RequestContext;
+use runar_macros::{action, service, subscribe};
+use runar_node::services::{RequestContext, EventContext};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::{Arc}};
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct MyData {
@@ -46,7 +46,7 @@ impl TestService {
         let total = data.as_type::<f64>()?;
 
         // Return the result
-        Ok(MyData {
+        let data = MyData {
             id,
             text_field: "test".to_string(),
             number_field: id,
@@ -54,7 +54,22 @@ impl TestService {
             float_field: total,
             vector_field: vec![1, 2, 3],
             map_field: HashMap::new(),
-        })
+        };
+        ctx.publish("my_data_changed", ArcValueType::from_struct(data.clone())).await?;
+        ctx.publish("age_changed", ArcValueType::new_primitive(25)).await?;
+        Ok(data)
+    }
+
+    #[subscribe(path="math/my_data_changed")]
+    async fn on_my_data_changed(&self, data: MyData, ctx: &EventContext) -> Result<()> {
+        ctx.debug(format!("my_data_changed: {}", data.text_field));
+        Ok(())
+    }
+
+    #[subscribe(path="math/age_changed")]
+    async fn on_age_changed(&self, new_age: i32, ctx: &EventContext) -> Result<()> {
+        ctx.debug(format!("age_changed: {}", new_age));
+        Ok(())
     }
 
     // Define an action using the action macro

@@ -13,42 +13,37 @@ use std::collections::HashMap;
 
 /// Implementation of the service macro
 pub fn service_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Parse the input as an impl block
+    // Parse the input as a struct
     let input = parse_macro_input!(item as ItemImpl);
     
-    // Extract the type being implemented
+    // Extract the struct name
     let struct_type = match &*input.self_ty {
-        Type::Path(TypePath { path, .. }) => {
+        Type::Path(TypePath { ref path, .. }) => {
             path.segments.last().unwrap().ident.clone()
         }
-        _ => panic!("Service macro can only be applied to struct implementations"),
+        _ => panic!("Service macro can only be applied to structs"),
     };
-
+    
     // Extract the service attributes from the macro annotation
     let service_attrs = extract_service_attributes(attr);
     
-    // Collect action methods to register in the init method
-    let action_methods = collect_action_methods(&input);
-    
+    // Find all methods marked with #[action] or #[subscribe]
+    let all_methods = collect_action_methods(&input);
+ 
     // Generate the service metadata
     let service_metadata = generate_service_metadata();
  
-    // Generate the implementation of the AbstractService trait
-    let abstract_service_impl = generate_abstract_service_impl(&struct_type, &action_methods, &service_attrs);
+    // Generate the trait implementation for the AbstractService trait
+    let service_impl = generate_abstract_service_impl(&struct_type, &all_methods, &service_attrs);
 
-    // Combine everything into the final code
-    let expanded = quote! {
-        // Service metadata
+    // Return the input struct unchanged along with the trait implementation
+    TokenStream::from(quote! {
+        #input
+        
         #service_metadata
         
-        // Original impl block
-        #input
-  
-        // AbstractService implementation
-        #abstract_service_impl
-    };
-
-    expanded.into()
+        #service_impl
+    })
 }
 
 /// Extract service attributes from the TokenStream
@@ -80,22 +75,32 @@ fn extract_service_attributes(attr: TokenStream) -> HashMap<String, String> {
     attrs
 }
 
-/// Collect methods marked with #[action] in the impl block
-fn collect_action_methods(input: &ItemImpl) -> Vec<Ident> {
-    let mut action_methods = Vec::new();
-    
-    for item in &input.items {
+/// Collect methods marked with #[action] or #[subscribe] in the impl block
+fn collect_action_methods(input: &ItemImpl) -> Vec<(Ident, &str)> {
+    // Find all methods marked with #[action] or #[subscribe]
+    let all_methods = input.items.iter().filter_map(|item| {
         if let ImplItem::Fn(method) = item {
-            for attr in &method.attrs {
-                if attr.path().is_ident("action") {
-                    action_methods.push(method.sig.ident.clone());
-                    break;
+            let is_action = method.attrs.iter().any(|attr| {
+                attr.path().is_ident("action")
+            });
+            if is_action {
+                Some((method.sig.ident.clone(), "action"))
+            } else {
+                let is_subscription = method.attrs.iter().any(|attr| {
+                    attr.path().is_ident("subscribe")
+                });
+                if is_subscription {
+                    Some((method.sig.ident.clone(), "subscribe"))
+                } else {
+                    None
                 }
             }
+        } else {
+            None
         }
-    }
+    }).collect::<Vec<(Ident, &str)>>();
     
-    action_methods
+    all_methods
 }
 
 /// Generate the service metadata static holder
@@ -111,11 +116,22 @@ fn generate_service_metadata() -> TokenStream2 {
 
 /// Generate the AbstractService trait implementation
 /// Ensure the struct implements Clone for proper action handler support
-fn generate_abstract_service_impl(struct_type: &Ident, action_methods: &[Ident], service_attrs: &HashMap<String, String>) -> TokenStream2 {
+fn generate_abstract_service_impl(struct_type: &Ident, all_methods: &[(Ident, &str)], service_attrs: &HashMap<String, String>) -> TokenStream2 {
     // Create method identifiers for action registration
-    let register_method_idents = action_methods.iter().map(|method_name| {
-        format_ident!("register_action_{}", method_name)
-    }).collect::<Vec<_>>();
+    let method_registrations = all_methods.iter().map(|(method_name, method_type)| {
+        if *method_type == "action" {
+            let register_method_name = format_ident!("register_action_{}", method_name);
+            quote! {
+                self.#register_method_name(context_ref).await?;
+            }
+        } else {
+            // Must be a subscription
+            let register_method_name = format_ident!("register_subscription_{}", method_name);
+            quote! {
+                self.#register_method_name(context_ref).await?;
+            }
+        }
+    });
     
     // Extract attribute values
     let name_value = service_attrs.get("name").cloned().unwrap_or_else(|| 
@@ -172,13 +188,14 @@ fn generate_abstract_service_impl(struct_type: &Ident, action_methods: &[Ident],
             }
 
             async fn init(&self, context: runar_node::services::LifecycleContext) -> anyhow::Result<()> {
-                // Register all action methods defined with the #[action] macro
-                #(
-                    self.#register_method_idents(&context).await?;
-                )*
+                // Create a reference to the context
+                let context_ref = &context;
+                
+                // Register all action and subscription methods defined with the #[action] or #[subscribe] macro
+                #(#method_registrations)*
                 
                 // Register complex types with the serializer
-                Self::register_types(&context).await?;
+                Self::register_types(context_ref).await?;
                 
                 Ok(())
             }
