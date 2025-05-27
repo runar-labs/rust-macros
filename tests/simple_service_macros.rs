@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use runar_common::types::ArcValueType;
-use runar_macros::{action, service, subscribe};
+use runar_macros::{action, service, subscribe, publish};
 use runar_node::services::{RequestContext, EventContext};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
@@ -36,6 +36,9 @@ impl Clone for TestService {
 #[service(name="Test Service Name", path="math", description="Test Service Description", version="0.0.1")]
 impl TestService {
 
+    //the publish macro will do a ctx.publish("my_data_auto", ArcValueType::from_struct(action_result.clone())).await?;
+    //it will publish the result of the action o the path (full or relative) same ruleas as action, subscribe macros in termos fo topic rules.,
+    #[publish(path="my_data_auto")]
     #[action(path="my_data")]
     async fn get_my_data(&self, id: i32, ctx: &RequestContext) -> Result<MyData> {
         // Log using the context
@@ -60,6 +63,18 @@ impl TestService {
         Ok(data)
     }
 
+    #[subscribe(path="math/my_data_auto")]
+    async fn on_my_data_auto(&self, data: MyData, ctx: &EventContext) -> Result<()> {
+        ctx.debug(format!("my_data_auto was an event published using the publish macro ->: {}", data.text_field));
+        Ok(())
+    }
+
+    #[subscribe(path="math/added")]
+    async fn on_added(&self, total: f64, ctx: &EventContext) -> Result<()> {
+        ctx.debug(format!("on_added: {}", total));
+        Ok(())
+    }
+
     #[subscribe(path="math/my_data_changed")]
     async fn on_my_data_changed(&self, data: MyData, ctx: &EventContext) -> Result<()> {
         ctx.debug(format!("my_data_changed: {}", data.text_field));
@@ -73,13 +88,11 @@ impl TestService {
     }
 
     // Define an action using the action macro
+    #[publish(path="added")]
     #[action]
     async fn add(&self, a_param: f64, b_param: f64, ctx: &RequestContext) -> Result<f64> {
- 
-
         // Log using the context
         ctx.debug(format!("Adding {} + {}", a_param, b_param));
-
         // Return the result
         Ok(a_param + b_param)
     }
@@ -128,13 +141,19 @@ impl TestService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runar_node::config::LogLevel;
+    use runar_node::config::LoggingConfig;
     use runar_node::Node;
     use runar_node::NodeConfig;
 
     #[tokio::test]
     async fn test_math_service() {
+
+        //set log to debug
+        let logging_config = LoggingConfig::new().with_default_level(LogLevel::Debug);
+
         // Create a node with a test network ID
-        let mut config = NodeConfig::new("test-node", "test_network");
+        let mut config = NodeConfig::new("test-node", "test_network").with_logging_config(logging_config);
         // Disable networking
         config.network_config = None;
         let mut node = Node::new(config).await.unwrap();

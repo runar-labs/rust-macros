@@ -8,6 +8,7 @@ extern crate proc_macro;
 mod service;
 mod action;
 mod subscribe;
+mod publish;
 mod utils;
 
 use proc_macro::TokenStream;
@@ -61,7 +62,7 @@ pub fn action(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// ```rust
 /// #[subscribe(path="service/event_name")]
-/// async fn on_event(&self, data: MyEventData, ctx: &RequestContext) -> Result<()> {
+/// async fn on_event(&self, data: MyEventData, ctx: &EventContext) -> Result<()> {
 ///     // Handle the event
 ///     ctx.debug(format!("Event received: {}", data.message));
 ///     Ok(())
@@ -70,4 +71,25 @@ pub fn action(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn subscribe(attr: TokenStream, item: TokenStream) -> TokenStream {
     subscribe::subscribe_macro(attr, item)
+}
+
+/// Macro for automatically publishing the result of an action
+///
+/// This macro simplifies publishing the result of an action by:
+/// 1. Automatically publishing the result to the specified topic
+/// 2. Handling errors gracefully
+///
+/// # Example
+///
+/// ```rust
+/// #[publish(path="math/result")]
+/// #[action]
+/// async fn add(&self, a: f64, b: f64, ctx: &RequestContext) -> Result<f64> {
+///     // The result will be automatically published to "math/result"
+///     Ok(a + b)
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn publish(attr: TokenStream, item: TokenStream) -> TokenStream {
+    publish::publish_macro(attr, item)
 }
