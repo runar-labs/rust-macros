@@ -170,8 +170,12 @@ fn generate_register_action_method(
     type_name: &String,
     needs_registration: &bool,
 ) -> TokenStream2 {
-    // Create the register method name (e.g., register_action_add for add)
-    let register_method_name = format_ident!("register_action_{}", fn_ident);
+    // Create a boolean expression for checking if there are parameters
+    let has_params = if params.is_empty() {
+        quote! { false }
+    } else {
+        quote! { true }
+    };
     
     // Generate parameter extraction code
     let param_extractions = generate_parameter_extractions(params);
@@ -179,7 +183,34 @@ fn generate_register_action_method(
     // Generate method call with extracted parameters
     let method_call = generate_method_call(fn_ident, params);
     
-    // Match exactly the format of the reference implementation
+    // Generate the appropriate result handling based on the return type
+    let result_handling = if *is_primitive {
+        quote! {
+            // Convert the result to ArcValueType
+            let value_type = runar_common::types::ArcValueType::new_primitive(result);
+            
+            Ok(runar_node::services::ServiceResponse {
+                status: 200,
+                data: Some(value_type),
+                error: None,
+            })
+        }
+    } else {
+        quote! {
+            // Convert the complex result to ArcValueType using appropriate value category
+            let value_type = runar_common::types::ArcValueType::from_struct(result);
+            
+            Ok(runar_node::services::ServiceResponse {
+                status: 200,
+                data: Some(value_type),
+                error: None,
+            })
+        }
+    };
+    
+    // Generate a unique method name for the action registration
+    let register_method_name = format_ident!("register_action_{}", fn_ident);
+    
     quote! {
         async fn #register_method_name(&self, context: &runar_node::services::LifecycleContext) -> anyhow::Result<()> {
             context.info(format!("Registering '{}' action", #action_name));
@@ -187,8 +218,8 @@ fn generate_register_action_method(
             // Create a clone of self that can be moved into the closure
             let self_clone = self.clone();
             
-            // Create the action handler
-            let handler = Arc::new(move |params_opt: Option<runar_common::types::ArcValueType>, ctx: runar_node::services::RequestContext| 
+            // Create the action handler as an Arc to match what the register_action expects
+            let handler = std::sync::Arc::new(move |params_opt: Option<runar_common::types::ArcValueType>, ctx: runar_node::services::RequestContext| 
                 -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<runar_node::services::ServiceResponse, anyhow::Error>> + Send>> {
                 let inner_self = self_clone.clone();
                 
@@ -197,30 +228,29 @@ fn generate_register_action_method(
                     let mut params_value = match params_opt {
                         Some(p) => p,
                         None => {
-                            ctx.error("No parameters provided".to_string());
-                            return Ok(runar_node::services::ServiceResponse {
-                                status: 400,
-                                data: None,
-                                error: Some("No parameters provided".to_string()),
-                            });
+                            // Check if method expects parameters
+                            if #has_params {
+                                ctx.error("No parameters provided".to_string());
+                                return Ok(runar_node::services::ServiceResponse {
+                                    status: 400,
+                                    data: None,
+                                    error: Some("No parameters provided".to_string()),
+                                });
+                            } else {
+                                // No parameters expected, so create an empty map
+                                runar_common::types::ArcValueType::new_map(
+                                    std::collections::HashMap::<String, runar_common::types::ArcValueType>::new()
+                                )
+                            }
                         }
                     };
-                    
-                    let params_map = params_value.as_map_ref::<String, f64>()?;
                     
                     #param_extractions
                     
                     // Call the actual method with the extracted parameters
                     match #method_call.await {
                         Ok(result) => {
-                            // Convert the result to ArcValueType
-                            let value_type = runar_common::types::ArcValueType::new_primitive(result);
-                            
-                            Ok(runar_node::services::ServiceResponse {
-                                status: 200,
-                                data: Some(value_type),
-                                error: None,
-                            })
+                            #result_handling
                         },
                         Err(err) => {
                             // Return an error response
@@ -237,7 +267,6 @@ fn generate_register_action_method(
             
             // If this action returns a type that needs registration with the serializer,
             // we would register it here
-            // Note: This would be expanded in a complete implementation
             if #needs_registration {
                 context.info(format!("Type registration needed for action '{}' with type: {}", #action_name, #type_name));
                 // The actual registration logic would depend on the service's serializer API
@@ -253,24 +282,185 @@ fn generate_register_action_method(
 fn generate_parameter_extractions(params: &[(Ident, Type)]) -> TokenStream2 {
     let mut extractions = TokenStream2::new();
     
-    for (param_ident, _param_type) in params {
+    for (param_ident, param_type) in params {
         let param_name = param_ident.to_string();
+        let type_str = quote! { #param_type }.to_string();
         
-        // Exactly match how the reference implementation extracts parameters
-        let extraction = quote! {
-            let #param_ident = match params_map.get(#param_name) {
-                Some(value) => {
-                    *value // We need to dereference since the methods expect f64 not &f64
-                },
-                None => {
-                    ctx.error(format!("Missing parameter {}", #param_name));
-                    return Ok(runar_node::services::ServiceResponse {
-                        status: 400,
-                        data: None,
-                        error: Some(format!("Missing parameter {}", #param_name)),
-                    });
-                }
-            };
+        // Extract parameters based on their type
+        let extraction = if type_str.contains("f64") || type_str.contains("f32") {
+            // Floating point extraction
+            quote! {
+                let #param_ident = match params_value.as_map_ref::<String, f64>() {
+                    Ok(map) => {
+                        match map.get(#param_name) {
+                            Some(value) => *value,
+                            None => {
+                                ctx.error(format!("Missing parameter {}", #param_name));
+                                return Ok(runar_node::services::ServiceResponse {
+                                    status: 400,
+                                    data: None,
+                                    error: Some(format!("Missing parameter {}", #param_name)),
+                                });
+                            }
+                        }
+                    },
+                    Err(err) => {
+                        ctx.error(format!("Failed to parse parameters as map with f64 values: {}", err));
+                        return Ok(runar_node::services::ServiceResponse {
+                            status: 400,
+                            data: None,
+                            error: Some(format!("Failed to parse parameters as map with f64 values: {}", err)),
+                        });
+                    }
+                };
+            }
+        } else if type_str.contains("i32") {
+            // Integer extraction (i32)
+            quote! {
+                let #param_ident = match params_value.as_map_ref::<String, i32>() {
+                    Ok(map) => {
+                        match map.get(#param_name) {
+                            Some(value) => *value,
+                            None => {
+                                ctx.error(format!("Missing parameter {}", #param_name));
+                                return Ok(runar_node::services::ServiceResponse {
+                                    status: 400,
+                                    data: None,
+                                    error: Some(format!("Missing parameter {}", #param_name)),
+                                });
+                            }
+                        }
+                    },
+                    Err(err) => {
+                        ctx.error(format!("Failed to parse parameters as map with i32 values: {}", err));
+                        return Ok(runar_node::services::ServiceResponse {
+                            status: 400,
+                            data: None,
+                            error: Some(format!("Failed to parse parameters as map with i32 values: {}", err)),
+                        });
+                    }
+                };
+            }
+        } else if type_str.contains("i64") {
+            // Integer extraction (i64)
+            quote! {
+                let #param_ident = match params_value.as_map_ref::<String, i64>() {
+                    Ok(map) => {
+                        match map.get(#param_name) {
+                            Some(value) => *value,
+                            None => {
+                                ctx.error(format!("Missing parameter {}", #param_name));
+                                return Ok(runar_node::services::ServiceResponse {
+                                    status: 400,
+                                    data: None,
+                                    error: Some(format!("Missing parameter {}", #param_name)),
+                                });
+                            }
+                        }
+                    },
+                    Err(err) => {
+                        ctx.error(format!("Failed to parse parameters as map with i64 values: {}", err));
+                        return Ok(runar_node::services::ServiceResponse {
+                            status: 400,
+                            data: None,
+                            error: Some(format!("Failed to parse parameters as map with i64 values: {}", err)),
+                        });
+                    }
+                };
+            }
+        } else if type_str.contains("String") || type_str.contains("&str") {
+            // String extraction
+            quote! {
+                let #param_ident = match params_value.as_map_ref::<String, String>() {
+                    Ok(map) => {
+                        match map.get(#param_name) {
+                            Some(value) => value.clone(),
+                            None => {
+                                ctx.error(format!("Missing parameter {}", #param_name));
+                                return Ok(runar_node::services::ServiceResponse {
+                                    status: 400,
+                                    data: None,
+                                    error: Some(format!("Missing parameter {}", #param_name)),
+                                });
+                            }
+                        }
+                    },
+                    Err(err) => {
+                        ctx.error(format!("Failed to parse parameters as map with String values: {}", err));
+                        return Ok(runar_node::services::ServiceResponse {
+                            status: 400,
+                            data: None,
+                            error: Some(format!("Failed to parse parameters as map with String values: {}", err)),
+                        });
+                    }
+                };
+            }
+        } else if type_str.contains("bool") {
+            // Boolean extraction
+            quote! {
+                let #param_ident = match params_value.as_map_ref::<String, bool>() {
+                    Ok(map) => {
+                        match map.get(#param_name) {
+                            Some(value) => *value,
+                            None => {
+                                ctx.error(format!("Missing parameter {}", #param_name));
+                                return Ok(runar_node::services::ServiceResponse {
+                                    status: 400,
+                                    data: None,
+                                    error: Some(format!("Missing parameter {}", #param_name)),
+                                });
+                            }
+                        }
+                    },
+                    Err(err) => {
+                        ctx.error(format!("Failed to parse parameters as map with bool values: {}", err));
+                        return Ok(runar_node::services::ServiceResponse {
+                            status: 400,
+                            data: None,
+                            error: Some(format!("Failed to parse parameters as map with bool values: {}", err)),
+                        });
+                    }
+                };
+            }
+        } else {
+            // Complex type (struct) extraction - attempt to deserialize
+            quote! {
+                let #param_ident = match params_value.as_map_ref::<String, runar_common::types::ArcValueType>() {
+                    Ok(map) => {
+                        match map.get(#param_name) {
+                            Some(value) => {
+                                match value.as_type::<#param_type>() {
+                                    Ok(val) => val,
+                                    Err(err) => {
+                                        ctx.error(format!("Failed to parse parameter {}: {}", #param_name, err));
+                                        return Ok(runar_node::services::ServiceResponse {
+                                            status: 400,
+                                            data: None,
+                                            error: Some(format!("Failed to parse parameter {}: {}", #param_name, err)),
+                                        });
+                                    }
+                                }
+                            },
+                            None => {
+                                ctx.error(format!("Missing parameter {}", #param_name));
+                                return Ok(runar_node::services::ServiceResponse {
+                                    status: 400,
+                                    data: None,
+                                    error: Some(format!("Missing parameter {}", #param_name)),
+                                });
+                            }
+                        }
+                    },
+                    Err(err) => {
+                        ctx.error(format!("Failed to parse parameters as map: {}", err));
+                        return Ok(runar_node::services::ServiceResponse {
+                            status: 400,
+                            data: None,
+                            error: Some(format!("Failed to parse parameters as map: {}", err)),
+                        });
+                    }
+                };
+            }
         };
         
         extractions.extend(extraction);

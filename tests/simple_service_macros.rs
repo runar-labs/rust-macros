@@ -7,22 +7,55 @@ use anyhow::Result;
 use runar_common::types::ArcValueType;
 use runar_macros::{action, service};
 use runar_node::services::RequestContext;
-use std::sync::{Arc, Mutex};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, sync::{Arc}};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct MyData {
+    id: i32,
+    text_field: String,
+    number_field: i32,
+    boolean_field: bool,
+    float_field: f64,
+    vector_field: Vec<i32>,
+    map_field: HashMap<String, i32>,
+}
 
 // Define a simple math service
-pub struct TestMathService {
+pub struct TestService {
     // Empty struct for testing
 }
 
 // Implement Clone manually for TestMathService
-impl Clone for TestMathService {
+impl Clone for TestService {
     fn clone(&self) -> Self {
         Self {}
     }
 }
 
 #[service]
-impl TestMathService {
+impl TestService {
+
+    #[action]
+    async fn get_my_data(&self, id: i32, ctx: &RequestContext) -> Result<MyData> {
+        // Log using the context
+        ctx.debug(format!("get_my_data id: {}", id));
+
+        let total_res = ctx.request("math/add", ArcValueType::new_map(HashMap::from([("a_param".to_string(), 10.0), ("b_param".to_string(), 5.0)]))).await?;
+        let mut data = total_res.data.unwrap();
+        let total = data.as_type::<f64>()?;
+
+        // Return the result
+        Ok(MyData {
+            id,
+            text_field: "test".to_string(),
+            number_field: id,
+            boolean_field: true,
+            float_field: total,
+            vector_field: vec![1, 2, 3],
+            map_field: HashMap::new(),
+        })
+    }
 
     // Define an action using the action macro
     #[action]
@@ -92,7 +125,7 @@ mod tests {
         let mut node = Node::new(config).await.unwrap();
 
         // Create a test math service
-        let service = TestMathService{};
+        let service = TestService{};
 
         // Add the service to the node
         node.add_service(service).await.unwrap();
@@ -178,5 +211,31 @@ mod tests {
         // Verify the error response
         assert_eq!(response.status, 500);
         assert!(response.error.unwrap().contains("Division by zero"));
+
+
+        // Make a request to the get_my_data action
+        let mut map = std::collections::HashMap::new();
+        map.insert("id".to_string(), 1);
+        let params = ArcValueType::new_map(map);
+
+        let response = node.request("math/get_my_data", params)
+        .await.unwrap();
+
+        // Verify the response
+        assert_eq!(response.status, 200);
+        let my_data = response.data.unwrap().as_type::<MyData>().unwrap();
+        assert_eq!(
+            my_data,
+            MyData {
+                id: 1,
+                text_field: "test".to_string(),
+                number_field: 1,
+                boolean_field: true,
+                float_field: 1.0,
+                vector_field: vec![1, 2, 3],
+                map_field: HashMap::new(),
+            }
+        );
+
     }
 }
