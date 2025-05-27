@@ -19,22 +19,44 @@ pub fn action_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Parse the input as a function
     let input = parse_macro_input!(item as ItemFn);
     
-    // Extract the action name (default to function name if not specified)
-    let action_name = if attr.is_empty() {
-        // If no name is provided, use the function name
-        input.sig.ident.to_string()
-    } else {
-        // Parse the attribute arguments
-        let parser = Punctuated::<Lit, Comma>::parse_terminated;
-        let lit_args = parser.parse(attr).expect("Failed to parse attribute arguments");
+    // Default to function name
+    let fn_name = input.sig.ident.to_string();
+    
+    // Parse the attributes
+    let mut action_name = fn_name.clone();
+    let mut action_path = fn_name.clone();
+    
+    if !attr.is_empty() {
+        // Convert attribute tokens to a string for simple parsing
+        let attr_str = attr.to_string();
         
-        if lit_args.is_empty() {
-            input.sig.ident.to_string()
+        // Extract attributes from the TokenStream
+        if attr_str.contains("path") {
+            // Try to parse as a name-value attribute
+            // For safety, we're using a simple string parsing approach
+            let attr_str = attr.to_string();
+            
+            if attr_str.contains("path") && attr_str.contains('=') && attr_str.contains('"') {
+                // Find the path value
+                let start_idx = attr_str.find("path").unwrap() + 4; // Skip 'path'
+                let equals_idx = attr_str[start_idx..].find('=').unwrap() + start_idx + 1; // Skip '='
+                let quote_start_idx = attr_str[equals_idx..].find('"').unwrap() + equals_idx + 1; // Skip opening quote
+                let quote_end_idx = attr_str[quote_start_idx..].find('"').unwrap() + quote_start_idx;
+                
+                // Extract the path value
+                action_path = attr_str[quote_start_idx..quote_end_idx].to_string();
+            }
         } else {
-            // Get the first argument as a string literal
-            match &lit_args[0] {
-                Lit::Str(s) => s.value(),
-                _ => panic!("Action name must be a string literal")
+            // Try to parse as a simple string literal for backward compatibility
+            let parser = Punctuated::<Lit, Comma>::parse_terminated;
+            if let Ok(lit_args) = parser.parse(attr.clone()) {
+                if !lit_args.is_empty() {
+                    // Get the first argument as a string literal for the name
+                    if let Lit::Str(s) = &lit_args[0] {
+                        action_name = s.value();
+                        action_path = action_name.clone(); // Use the same value for path if not specified separately
+                    }
+                }
             }
         }
     };
@@ -49,6 +71,7 @@ pub fn action_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
     let register_action_method = generate_register_action_method(
         &input.sig.ident,
         &action_name,
+        &action_path,
         &params,
         &input.sig.output,
         &return_type_info.is_primitive,
@@ -164,6 +187,7 @@ fn extract_parameters(input: &ItemFn) -> Vec<(Ident, Type)> {
 fn generate_register_action_method(
     fn_ident: &Ident,
     action_name: &str,
+    action_path: &str,
     params: &[(Ident, Type)],
     return_type: &ReturnType,
     is_primitive: &bool,
@@ -272,8 +296,8 @@ fn generate_register_action_method(
                 // The actual registration logic would depend on the service's serializer API
             }
             
-            // Register the action handler
-            context.register_action(#action_name, handler).await
+            // Register the action handler with the configured path
+            context.register_action(#action_path, handler).await
         }
     }
 }

@@ -33,10 +33,10 @@ impl Clone for TestService {
     }
 }
 
-#[service]
+#[service(name="Test Service Name", path="math", description="Test Service Description", version="0.0.1")]
 impl TestService {
 
-    #[action]
+    #[action(path="my_data")]
     async fn get_my_data(&self, id: i32, ctx: &RequestContext) -> Result<MyData> {
         // Log using the context
         ctx.debug(format!("get_my_data id: {}", id));
@@ -218,7 +218,7 @@ mod tests {
         map.insert("id".to_string(), 1);
         let params = ArcValueType::new_map(map);
 
-        let response = node.request("math/get_my_data", params)
+        let response = node.request("math/my_data", params)
         .await.unwrap();
 
         // Verify the response
@@ -231,7 +231,7 @@ mod tests {
                 text_field: "test".to_string(),
                 number_field: 1,
                 boolean_field: true,
-                float_field: 1.0,
+                float_field: 15.0,
                 vector_field: vec![1, 2, 3],
                 map_field: HashMap::new(),
             }
