@@ -4,6 +4,7 @@
 // to create a simple service with actions.
 
 use anyhow::Result;
+use futures::lock::Mutex;
 use runar_common::types::ArcValueType;
 use runar_macros::{action, service, subscribe, publish};
 use runar_node::services::{RequestContext, EventContext};
@@ -23,13 +24,15 @@ struct MyData {
 
 // Define a simple math service
 pub struct TestService {
-    // Empty struct for testing
+    store: Arc<Mutex<HashMap<String, ArcValueType>>>,
 }
 
 // Implement Clone manually for TestMathService
 impl Clone for TestService {
     fn clone(&self) -> Self {
-        Self {}
+        Self {
+            store: self.store.clone(),
+        }
     }
 }
 
@@ -44,7 +47,7 @@ impl TestService {
         // Log using the context
         ctx.debug(format!("get_my_data id: {}", id));
 
-        let total_res = ctx.request("math/add", ArcValueType::new_map(HashMap::from([("a_param".to_string(), 10.0), ("b_param".to_string(), 5.0)]))).await?;
+        let total_res = ctx.request("math/add", ArcValueType::new_map(HashMap::from([("a_param".to_string(), 1000.0), ("b_param".to_string(), 500.0)]))).await?;
         let mut data = total_res.data.unwrap();
         let total = data.as_type::<f64>()?;
 
@@ -66,24 +69,72 @@ impl TestService {
     #[subscribe(path="math/my_data_auto")]
     async fn on_my_data_auto(&self, data: MyData, ctx: &EventContext) -> Result<()> {
         ctx.debug(format!("my_data_auto was an event published using the publish macro ->: {}", data.text_field));
+        
+        let mut lock = self.store.lock().await;
+        let existing = lock.get("my_data_auto");
+        if let Some(existing) = existing {
+            let mut existing = existing.clone();
+            let mut existing = existing.as_type::<Vec<MyData>>().unwrap();
+            existing.push(data.clone());
+            lock.insert("my_data_auto".to_string(), ArcValueType::new_list(existing));
+        } else {
+            lock.insert("my_data_auto".to_string(), ArcValueType::new_list(vec![data.clone()]));
+        }
+        
         Ok(())
     }
 
     #[subscribe(path="math/added")]
     async fn on_added(&self, total: f64, ctx: &EventContext) -> Result<()> {
-        ctx.debug(format!("on_added: {}", total));
+        ctx.debug(format!("on_added: {}", total)); 
+
+        let mut lock =self.store.lock().await;
+        let existing = lock.get("added");
+        if let Some(existing) = existing {
+            let mut existing = existing.clone();
+            let mut existing = existing.as_type::<Vec<f64>>().unwrap();
+            existing.push(total);
+            lock.insert("added".to_string(), ArcValueType::new_list(existing));
+        } else {
+            lock.insert("added".to_string(), ArcValueType::new_list(vec![total]));
+        }
+        
         Ok(())
     }
 
     #[subscribe(path="math/my_data_changed")]
     async fn on_my_data_changed(&self, data: MyData, ctx: &EventContext) -> Result<()> {
         ctx.debug(format!("my_data_changed: {}", data.text_field));
+        
+        let mut lock = self.store.lock().await;
+        let existing = lock.get("my_data_changed");
+        if let Some(existing) = existing {
+            let mut existing = existing.clone();
+            let mut existing = existing.as_type::<Vec<MyData>>().unwrap();
+            existing.push(data.clone());
+            lock.insert("my_data_changed".to_string(), ArcValueType::new_list(existing));
+        } else {
+            lock.insert("my_data_changed".to_string(), ArcValueType::new_list(vec![data.clone()]));
+        }
+        
         Ok(())
     }
 
     #[subscribe(path="math/age_changed")]
     async fn on_age_changed(&self, new_age: i32, ctx: &EventContext) -> Result<()> {
         ctx.debug(format!("age_changed: {}", new_age));
+        
+        let mut lock = self.store.lock().await;
+        let existing = lock.get("age_changed");
+        if let Some(existing) = existing {
+            let mut existing = existing.clone();
+            let mut existing = existing.as_type::<Vec<i32>>().unwrap();
+            existing.push(new_age);
+            lock.insert("age_changed".to_string(), ArcValueType::new_list(existing));
+        } else {
+            lock.insert("age_changed".to_string(), ArcValueType::new_list(vec![new_age]));
+        }
+        
         Ok(())
     }
 
@@ -158,8 +209,11 @@ mod tests {
         config.network_config = None;
         let mut node = Node::new(config).await.unwrap();
 
+
+        let store = Arc::new(Mutex::new(HashMap::new()));
+
         // Create a test math service
-        let service = TestService{};
+        let service = TestService{store: store.clone()};
 
         // Add the service to the node
         node.add_service(service).await.unwrap();
@@ -265,11 +319,61 @@ mod tests {
                 text_field: "test".to_string(),
                 number_field: 1,
                 boolean_field: true,
-                float_field: 15.0,
+                float_field: 1500.0,
                 vector_field: vec![1, 2, 3],
                 map_field: HashMap::new(),
             }
         );
+
+        // Let's assert all the events stored in our store
+        let store = store.lock().await;
+        
+        // Check if my_data_auto events were stored correctly as a vector
+        if let Some(my_data_arc) = store.get("my_data_auto") {
+            let mut my_data_arc = my_data_arc.clone(); // Clone to get ownership
+            let my_data_vec = my_data_arc.as_list_ref::<MyData>().unwrap();
+            assert!(!my_data_vec.is_empty(), "Expected at least one my_data_auto event");
+            assert_eq!(my_data_vec[0], my_data, "The first my_data_auto event doesn't match expected data");
+            println!("my_data_auto events count: {}", my_data_vec.len());
+        } else {
+            panic!("Expected 'my_data_auto' key in store, but it wasn't found");
+        }
+        
+        // Check for added events
+        if let Some(added_arc) = store.get("added") {
+            let mut added_arc = added_arc.clone();
+            let added_vec = added_arc.as_list_ref::<f64>().unwrap();
+            assert!(!added_vec.is_empty(), "Expected at least one added event");
+            assert_eq!(added_vec[0], 15.0, "Expected first added value to be 15.0"); // 10.0 + 5.0
+            assert_eq!(added_vec[1], 1500.0, "Expected second added value to be 1500.0"); // 1000.0 + 500.0
+            assert_eq!(added_vec.len(), 2, "Expected two added events");
+            println!("added events count: {}", added_vec.len());
+        } else {
+            panic!("Expected 'added' key in store, but it wasn't found");
+        }
+        
+        // Check for my_data_changed events
+        if let Some(changed_arc) = store.get("my_data_changed") {
+            let mut changed_arc = changed_arc.clone();
+            let changed_vec = changed_arc.as_list_ref::<MyData>().unwrap();
+            assert!(!changed_vec.is_empty(), "Expected at least one my_data_changed event");
+            assert_eq!(changed_vec[0].id, my_data.id, "Expected first my_data_changed.id to match");
+            println!("my_data_changed events count: {}", changed_vec.len());
+        } else {
+            panic!("Expected 'my_data_changed' key in store, but it wasn't found");
+        }
+        
+        // Check for age_changed events
+        if let Some(age_arc) = store.get("age_changed") {
+            let mut age_arc = age_arc.clone();
+            let age_vec = age_arc.as_list_ref::<i32>().unwrap();
+            assert!(!age_vec.is_empty(), "Expected at least one age_changed event");
+            assert_eq!(age_vec[0], 25, "Expected first age_changed value to be 25");
+            assert_eq!(age_vec.len(), 1, "Expected one age_changed event");
+            println!("age_changed events count: {}", age_vec.len());
+        } else {
+            panic!("Expected 'age_changed' key in store, but it wasn't found");
+        }
 
     }
 }

@@ -3,16 +3,14 @@
 // This module implements the publish macro, which automatically publishes
 // the result of an action to a specified topic.
 
-use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro::TokenStream; 
 use quote::quote;
 use syn::{parse_macro_input, ItemFn, Lit, LitStr, Expr,
-    parse::Parse, parse::ParseStream, Token, Result, Meta, ReturnType};
+    parse::Parse, parse::ParseStream, Token, Result, Meta};
 
 // Define a struct to parse the macro attributes
 pub struct PublishImpl {
-    pub path: LitStr,
-    pub handler: Option<Expr>,
+    pub path: LitStr, 
 }
 
 impl Parse for PublishImpl {
@@ -27,7 +25,6 @@ impl Parse for PublishImpl {
                         if let Lit::Str(lit_str) = &expr_lit.lit {
                             return Ok(PublishImpl {
                                 path: lit_str.clone(),
-                                handler: None,
                             });
                         }
                     }
@@ -40,14 +37,14 @@ impl Parse for PublishImpl {
         let path = input.parse::<LitStr>()?;
         
         // Check if we have a handler
-        if input.peek(Token![,]) {
-            input.parse::<Token![,]>()?;
-            let handler = input.parse::<Expr>()?;
-            Ok(PublishImpl { path, handler: Some(handler) })
-        } else {
+        // if input.peek(Token![,]) {
+        //     input.parse::<Token![,]>()?;
+        //     let handler = input.parse::<Expr>()?;
+        //     Ok(PublishImpl { path, handler: Some(handler) })
+        // } else {
             // Just a path string
-            Ok(PublishImpl { path, handler: None })
-        }
+            Ok(PublishImpl { path  })
+        // }
     }
 }
 
@@ -60,8 +57,6 @@ pub fn publish_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
     let publish_impl = parse_macro_input!(attr as PublishImpl);
     let path = &publish_impl.path;
     
-    // Get the return type
-    let return_type = &input.sig.output;
     
     // Get the function body
     let attrs = &input.attrs;
