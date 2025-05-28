@@ -8,8 +8,8 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{quote, format_ident};
 use syn::{parse_macro_input, ItemImpl, Type, TypePath, Ident, ImplItem, 
-          Lit, Meta, Attribute, LitStr, parse_quote};
-use std::collections::HashMap;
+          Lit, Meta, Attribute, LitStr, parse_quote, ImplItemFn, ReturnType, FnArg, Pat, PatType};
+use std::collections::{HashMap, HashSet};
 
 /// Implementation of the service macro
 pub fn service_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -76,7 +76,7 @@ fn extract_service_attributes(attr: TokenStream) -> HashMap<String, String> {
 }
 
 /// Collect methods marked with #[action] or #[subscribe] in the impl block
-fn collect_action_methods(input: &ItemImpl) -> Vec<(Ident, &str)> {
+fn collect_action_methods(input: &ItemImpl) -> Vec<(Ident, &str, ImplItemFn)> {
     // Find all methods marked with #[action] or #[subscribe]
     let all_methods = input.items.iter().filter_map(|item| {
         if let ImplItem::Fn(method) = item {
@@ -84,13 +84,13 @@ fn collect_action_methods(input: &ItemImpl) -> Vec<(Ident, &str)> {
                 attr.path().is_ident("action")
             });
             if is_action {
-                Some((method.sig.ident.clone(), "action"))
+                Some((method.sig.ident.clone(), "action", method.clone()))
             } else {
                 let is_subscription = method.attrs.iter().any(|attr| {
                     attr.path().is_ident("subscribe")
                 });
                 if is_subscription {
-                    Some((method.sig.ident.clone(), "subscribe"))
+                    Some((method.sig.ident.clone(), "subscribe", method.clone()))
                 } else {
                     None
                 }
@@ -98,7 +98,7 @@ fn collect_action_methods(input: &ItemImpl) -> Vec<(Ident, &str)> {
         } else {
             None
         }
-    }).collect::<Vec<(Ident, &str)>>();
+    }).collect::<Vec<(Ident, &str, ImplItemFn)>>();
     
     all_methods
 }
@@ -114,11 +114,136 @@ fn generate_service_metadata() -> TokenStream2 {
     }
 }
 
+/// Extract types from a method's parameters and return type
+fn extract_types_from_method(method: &ImplItemFn) -> Vec<String> {
+    let mut types = Vec::new();
+    
+    // Extract parameter types
+    for arg in &method.sig.inputs {
+        if let FnArg::Typed(PatType { ty, pat, .. }) = arg {
+            // Skip context parameter
+            if let Pat::Ident(pat_ident) = &**pat {
+                let param_name = pat_ident.ident.to_string();
+                if param_name == "ctx" || param_name == "context" || param_name.ends_with("ctx") {
+                    continue;
+                }
+            }
+            
+            // Get the type as a string
+            let type_str = quote! { #ty }.to_string();
+            types.push(type_str);
+        }
+    }
+    
+    // Extract return type
+    if let ReturnType::Type(_, ty) = &method.sig.output {
+        // Get the return type as a string
+        let return_type_str = quote! { #ty }.to_string();
+        
+        // Clean up the string representation
+        let clean_return_type = return_type_str
+            .replace(" >", ">")
+            .replace("< ", "<")
+            .replace(" , ", ", ");
+        
+        // Check if it's a Result type
+        if clean_return_type.starts_with("Result<") || clean_return_type.starts_with("Result <") {
+            // Extract the content between the first < and the last >
+            let start_idx = clean_return_type.find('<').unwrap_or(0) + 1;
+            let end_idx = clean_return_type.rfind('>').unwrap_or(clean_return_type.len());
+            
+            if start_idx < end_idx {
+                let inner_content = &clean_return_type[start_idx..end_idx];
+                
+                // Split by the first comma to get the success type (T) and error type (E)
+                if let Some(comma_idx) = inner_content.find(',') {
+                    // Extract the success type (T)
+                    let success_type = inner_content[..comma_idx].trim().to_string();
+                    if !success_type.is_empty() && success_type != "()" {
+                        types.push(success_type);
+                    }
+                    
+                    // Extract the error type (E) if it's not a standard error type
+                    let error_type = inner_content[comma_idx + 1..].trim().to_string();
+                    if !error_type.is_empty() && 
+                       error_type != "()" && 
+                       error_type != "E" && 
+                       !error_type.starts_with("anyhow::Error") && 
+                       !error_type.starts_with("anyhow :: Error") {
+                        types.push(error_type);
+                    }
+                } else {
+                    // If there's no comma, just add the whole inner content
+                    if !inner_content.is_empty() && inner_content != "()" {
+                        types.push(inner_content.to_string());
+                    }
+                }
+            }
+        } else {
+            // For non-Result types, just add the type directly
+            types.push(clean_return_type);
+        }
+    }
+    
+    types
+}
+
+/// Format type string to be more readable and filter out standard types
+fn format_type_string(type_str: &str) -> Option<String> {
+    // Remove extra spaces that quote! adds
+    let mut formatted = type_str.replace(" >", ">")
+                              .replace("< ", "<")
+                              .replace(" , ", ", ");
+    
+    // Remove references
+    if formatted.starts_with("& ") {
+        formatted = formatted[2..].to_string();
+    }
+    
+    // Filter out standard types that don't need registration
+    match formatted.as_str() {
+        // Primitive types
+        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" |
+        "u8" | "u16" | "u32" | "u64" | "u128" | "usize" |
+        "f32" | "f64" | "bool" | "char" | "()" | "String" => None,
+        
+        // Standard library types that are handled by default
+        s if s.starts_with("Vec<") && is_primitive_type(&s[4..s.len()-1]) => None,
+        s if s.starts_with("Option<") && is_primitive_type(&s[7..s.len()-1]) => None,
+        s if s.starts_with("HashMap<") => {
+            // Only return None if both key and value are primitive types
+            let inner = &s[8..s.len()-1];
+            if let Some(comma_idx) = inner.find(',') {
+                let key_type = inner[..comma_idx].trim();
+                let value_type = inner[comma_idx+1..].trim();
+                if is_primitive_type(key_type) && is_primitive_type(value_type) {
+                    None
+                } else {
+                    Some(formatted)
+                }
+            } else {
+                Some(formatted)
+            }
+        },
+        
+        // Keep all other types
+        _ => Some(formatted),
+    }
+}
+
+/// Check if a type is a primitive type
+fn is_primitive_type(type_str: &str) -> bool {
+    matches!(type_str, 
+        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" |
+        "u8" | "u16" | "u32" | "u64" | "u128" | "usize" |
+        "f32" | "f64" | "bool" | "char" | "()" | "String")
+}
+
 /// Generate the AbstractService trait implementation
 /// Ensure the struct implements Clone for proper action handler support
-fn generate_abstract_service_impl(struct_type: &Ident, all_methods: &[(Ident, &str)], service_attrs: &HashMap<String, String>) -> TokenStream2 {
+fn generate_abstract_service_impl(struct_type: &Ident, all_methods: &[(Ident, &str, ImplItemFn)], service_attrs: &HashMap<String, String>) -> TokenStream2 {
     // Create method identifiers for action registration
-    let method_registrations = all_methods.iter().map(|(method_name, method_type)| {
+    let method_registrations = all_methods.iter().map(|(method_name, method_type, _)| {
         if *method_type == "action" {
             let register_method_name = format_ident!("register_action_{}", method_name);
             quote! {
@@ -138,13 +263,15 @@ fn generate_abstract_service_impl(struct_type: &Ident, all_methods: &[(Ident, &s
         format!("{}", struct_type)
     );
     
+    // Derive path from attributes or struct name, following a consistent pattern
     let path_value = if let Some(path) = service_attrs.get("path") {
+        // Explicit path has highest priority
         path.clone()
     } else if let Some(name) = service_attrs.get("name") {
+        // Convert service name to path (lowercase, replace spaces with underscores)
         name.to_lowercase().replace(" ", "_")
-    } else if struct_type.to_string() == "TestMathService" || struct_type.to_string() == "TestService" {
-        "math".to_string()
     } else {
+        // Default to lowercase struct name
         struct_type.to_string().to_lowercase()
     };
     
@@ -155,6 +282,34 @@ fn generate_abstract_service_impl(struct_type: &Ident, all_methods: &[(Ident, &s
     let version_value = service_attrs.get("version").cloned().unwrap_or_else(|| 
         "1.0.0".to_string()
     );
+
+    // Extract all types from methods
+    let mut all_types = HashSet::new();
+    
+    for (_, _, method) in all_methods {
+        let types = extract_types_from_method(method);
+        for type_str in types {
+            if let Some(formatted) = format_type_string(&type_str) {
+                // Skip the service type itself
+                if formatted != struct_type.to_string() {
+                    all_types.insert(formatted);
+                }
+            }
+        }
+    }
+    
+    // Convert to a vector and sort for consistent output
+    let mut sorted_types: Vec<_> = all_types.into_iter().collect();
+    sorted_types.sort();
+    
+    // Create a string literal with all the types
+    let types_str = sorted_types.join("\n");
+    
+    // Generate code to log the types
+    let type_collection_code = quote! {
+        let types_string = #types_str;
+        context.info(format!("Types used by service {}:\n{}", stringify!(#struct_type), types_string));
+    };
 
     quote! {
         #[async_trait::async_trait]
@@ -215,9 +370,8 @@ fn generate_abstract_service_impl(struct_type: &Ident, all_methods: &[(Ident, &s
                 // Acquire a write lock on the serializer
                 let mut serializer = context.serializer.write().await;
                 
-                // Register all complex types used by the service's actions
-                // In a full implementation, we would scan return types and register them
-                // automatically. For now, this is a placeholder.
+                // Log all the collected types
+                #type_collection_code
                 
                 Ok(())
             }

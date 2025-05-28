@@ -22,6 +22,15 @@ struct MyData {
     map_field: HashMap<String, i32>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct User {
+    id: i32,
+    name:String,
+    email:String,
+    age:i32,
+}
+    
+
 // Define a simple math service
 pub struct TestService {
     store: Arc<Mutex<HashMap<String, ArcValueType>>>,
@@ -38,6 +47,17 @@ impl Clone for TestService {
 
 #[service(name="Test Service Name", path="math", description="Test Service Description", version="0.0.1")]
 impl TestService {
+
+    #[action]
+    async fn get_user(&self, id: i32, ctx: &RequestContext) -> Result<User> {
+        let user = User {
+            id,
+            name: "John Doe".to_string(),
+            email: "john.doe@example.com".to_string(),
+            age: 30,
+        };
+        Ok(user)
+    }
 
     //the publish macro will do a ctx.publish("my_data_auto", ArcValueType::from_struct(action_result.clone())).await?;
     //it will publish the result of the action o the path (full or relative) same ruleas as action, subscribe macros in termos fo topic rules.,
@@ -295,10 +315,23 @@ mod tests {
         assert!(response.unwrap_err().to_string().contains("Division by zero"));
 
 
+        // Make a request to the get_user action
+        let mut map = std::collections::HashMap::new();
+        map.insert("id".to_string(), 42);
+        let params = ArcValueType::new_map(map);
+
+        let response = node.request("math/get_user", Some(params))
+        .await.unwrap();
+        
+        // Verify the response
+        let user = response.unwrap().as_type::<User>().unwrap();
+        assert_eq!(user.id, 42);
+        assert_eq!(user.name, "John Doe");
+        
         // Make a request to the get_my_data action
         let mut map = std::collections::HashMap::new();
         map.insert("id".to_string(), 1);
-        let params = ArcValueType::new_map(map);
+        let params = ArcValueType::new_map(map);        
 
         let response = node.request("math/my_data", Some(params))
         .await.unwrap();
