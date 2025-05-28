@@ -3,7 +3,7 @@
 // This test demonstrates how to use the service and action macros
 // to create a simple service with actions.
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use futures::lock::Mutex;
 use runar_common::types::ArcValueType;
 use runar_macros::{action, service, subscribe, publish};
@@ -47,8 +47,8 @@ impl TestService {
         // Log using the context
         ctx.debug(format!("get_my_data id: {}", id));
 
-        let total_res = ctx.request("math/add", ArcValueType::new_map(HashMap::from([("a_param".to_string(), 1000.0), ("b_param".to_string(), 500.0)]))).await?;
-        let mut data = total_res.data.unwrap();
+        let total_res = ctx.request("math/add", Some(ArcValueType::new_map(HashMap::from([("a_param".to_string(), 1000.0), ("b_param".to_string(), 500.0)])))).await?;
+        let mut data = total_res.unwrap();
         let total = data.as_type::<f64>()?;
 
         // Return the result
@@ -61,8 +61,8 @@ impl TestService {
             vector_field: vec![1, 2, 3],
             map_field: HashMap::new(),
         };
-        ctx.publish("my_data_changed", ArcValueType::from_struct(data.clone())).await?;
-        ctx.publish("age_changed", ArcValueType::new_primitive(25)).await?;
+        ctx.publish("my_data_changed", Some(ArcValueType::from_struct(data.clone()))).await?;
+        ctx.publish("age_changed", Some(ArcValueType::new_primitive(25))).await?;
         Ok(data)
     }
 
@@ -229,13 +229,12 @@ mod tests {
 
         // Call the add action
         let response =
-            node.request("math/add", params)
+            node.request("math/add", Some(params))
         .await.unwrap();
 
         // Verify the response
-        assert_eq!(response.status, 200);
         assert_eq!(
-            response.data.unwrap().as_type::<f64>().unwrap(),
+            response.unwrap().as_type::<f64>().unwrap(),
             15.0
         );
 
@@ -245,13 +244,12 @@ mod tests {
         map.insert("b_param".to_string(), 5.0);
         let params = ArcValueType::new_map(map);
 
-        let response = node.request("math/subtract", params)
+        let response = node.request("math/subtract", Some(params))
         .await.unwrap();
 
         // Verify the response
-        assert_eq!(response.status, 200);
         assert_eq!(
-            response.data.unwrap().as_type::<f64>().unwrap(),
+            response.unwrap().as_type::<f64>().unwrap(),
             5.0
         );
 
@@ -261,13 +259,11 @@ mod tests {
         map.insert("b_param".to_string(), 3.0);
         let params = ArcValueType::new_map(map);
 
-        let response = node.request("math/multiply_numbers", params)
+        let response = node.request("math/multiply_numbers", Some(params))
         .await.unwrap();
 
         // Verify the response
-        assert_eq!(response.status, 200);
-        assert_eq!(
-            response.data.unwrap().as_type::<f64>().unwrap(),
+        assert_eq!(response.unwrap().as_type::<f64>().unwrap(),
             15.0
         );
 
@@ -277,13 +273,12 @@ mod tests {
         map.insert("b_param".to_string(), 3.0);
         let params = ArcValueType::new_map(map);
 
-        let response = node.request("math/divide", params)
+        let response = node.request("math/divide", Some(params))
         .await.unwrap();
 
         // Verify the response 
-        assert_eq!(response.status, 200);
         assert_eq!(
-            response.data.unwrap().as_type::<f64>().unwrap(),
+            response.unwrap().as_type::<f64>().unwrap(),
             2.0
         );
 
@@ -293,12 +288,11 @@ mod tests {
         map.insert("b_param".to_string(), 0.0);
         let params = ArcValueType::new_map(map);
 
-        let response = node.request("math/divide", params)
-        .await.unwrap();
+        let response = node.request("math/divide", Some(params))
+        .await;
 
         // Verify the error response
-        assert_eq!(response.status, 500);
-        assert!(response.error.unwrap().contains("Division by zero"));
+        assert!(response.unwrap_err().to_string().contains("Division by zero"));
 
 
         // Make a request to the get_my_data action
@@ -306,12 +300,11 @@ mod tests {
         map.insert("id".to_string(), 1);
         let params = ArcValueType::new_map(map);
 
-        let response = node.request("math/my_data", params)
+        let response = node.request("math/my_data", Some(params))
         .await.unwrap();
 
         // Verify the response
-        assert_eq!(response.status, 200);
-        let my_data = response.data.unwrap().as_type::<MyData>().unwrap();
+        let my_data = response.unwrap().as_type::<MyData>().unwrap();
         assert_eq!(
             my_data,
             MyData {

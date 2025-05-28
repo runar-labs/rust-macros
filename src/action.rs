@@ -81,6 +81,7 @@ pub fn action_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
     
     // Combine the original function with the generated register method
     let expanded = quote! {
+        
         #input
 
         #register_action_method
@@ -212,23 +213,13 @@ fn generate_register_action_method(
         quote! {
             // Convert the result to ArcValueType
             let value_type = runar_common::types::ArcValueType::new_primitive(result);
-            
-            Ok(runar_node::services::ServiceResponse {
-                status: 200,
-                data: Some(value_type),
-                error: None,
-            })
+            Ok(Some(value_type))
         }
     } else {
         quote! {
             // Convert the complex result to ArcValueType using appropriate value category
             let value_type = runar_common::types::ArcValueType::from_struct(result);
-            
-            Ok(runar_node::services::ServiceResponse {
-                status: 200,
-                data: Some(value_type),
-                error: None,
-            })
+            Ok(Some(value_type))
         }
     };
     
@@ -244,7 +235,7 @@ fn generate_register_action_method(
             
             // Create the action handler as an Arc to match what the register_action expects
             let handler = std::sync::Arc::new(move |params_opt: Option<runar_common::types::ArcValueType>, ctx: runar_node::services::RequestContext| 
-                -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<runar_node::services::ServiceResponse, anyhow::Error>> + Send>> {
+                -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<runar_common::types::ArcValueType>, anyhow::Error>> + Send>> {
                 let inner_self = self_clone.clone();
                 
                 Box::pin(async move {
@@ -255,11 +246,7 @@ fn generate_register_action_method(
                             // Check if method expects parameters
                             if #has_params {
                                 ctx.error("No parameters provided".to_string());
-                                return Ok(runar_node::services::ServiceResponse {
-                                    status: 400,
-                                    data: None,
-                                    error: Some("No parameters provided".to_string()),
-                                });
+                                return Err(anyhow!("No parameters provided"));
                             } else {
                                 // No parameters expected, so create an empty map
                                 runar_common::types::ArcValueType::new_map(
@@ -279,11 +266,7 @@ fn generate_register_action_method(
                         Err(err) => {
                             // Return an error response
                             ctx.error(format!("Action '{}' failed: {}", #action_name, err));
-                            Ok(runar_node::services::ServiceResponse {
-                                status: 500,
-                                data: None,
-                                error: Some(err.to_string()),
-                            })
+                            return Err(anyhow!(err.to_string()));
                         }
                     }
                 })
@@ -323,21 +306,13 @@ fn generate_parameter_extractions(params: &[(Ident, Type)]) -> TokenStream2 {
                             Some(value) => *value,
                             None => {
                                 ctx.error(format!("Missing parameter {}", #param_name));
-                                return Ok(runar_node::services::ServiceResponse {
-                                    status: 400,
-                                    data: None,
-                                    error: Some(format!("Missing parameter {}", #param_name)),
-                                });
+                                return Err(anyhow!(format!("Missing parameter {}", #param_name)));
                             }
                         }
                     },
                     Err(err) => {
                         ctx.error(format!("Failed to parse parameters as map with f64 values: {}", err));
-                        return Ok(runar_node::services::ServiceResponse {
-                            status: 400,
-                            data: None,
-                            error: Some(format!("Failed to parse parameters as map with f64 values: {}", err)),
-                        });
+                        return Err(anyhow!(format!("Failed to parse parameters as map with f64 values: {}", err)));
                     }
                 };
             }
@@ -350,21 +325,13 @@ fn generate_parameter_extractions(params: &[(Ident, Type)]) -> TokenStream2 {
                             Some(value) => *value,
                             None => {
                                 ctx.error(format!("Missing parameter {}", #param_name));
-                                return Ok(runar_node::services::ServiceResponse {
-                                    status: 400,
-                                    data: None,
-                                    error: Some(format!("Missing parameter {}", #param_name)),
-                                });
+                                return Err(anyhow!(format!("Missing parameter {}", #param_name)));
                             }
                         }
                     },
                     Err(err) => {
                         ctx.error(format!("Failed to parse parameters as map with i32 values: {}", err));
-                        return Ok(runar_node::services::ServiceResponse {
-                            status: 400,
-                            data: None,
-                            error: Some(format!("Failed to parse parameters as map with i32 values: {}", err)),
-                        });
+                        return Err(anyhow!(format!("Failed to parse parameters as map with i32 values: {}", err)));
                     }
                 };
             }
@@ -377,21 +344,13 @@ fn generate_parameter_extractions(params: &[(Ident, Type)]) -> TokenStream2 {
                             Some(value) => *value,
                             None => {
                                 ctx.error(format!("Missing parameter {}", #param_name));
-                                return Ok(runar_node::services::ServiceResponse {
-                                    status: 400,
-                                    data: None,
-                                    error: Some(format!("Missing parameter {}", #param_name)),
-                                });
+                                return Err(anyhow!(format!("Missing parameter {}", #param_name)));
                             }
                         }
                     },
                     Err(err) => {
                         ctx.error(format!("Failed to parse parameters as map with i64 values: {}", err));
-                        return Ok(runar_node::services::ServiceResponse {
-                            status: 400,
-                            data: None,
-                            error: Some(format!("Failed to parse parameters as map with i64 values: {}", err)),
-                        });
+                        return Err(anyhow!(format!("Failed to parse parameters as map with i64 values: {}", err)));
                     }
                 };
             }
@@ -404,21 +363,13 @@ fn generate_parameter_extractions(params: &[(Ident, Type)]) -> TokenStream2 {
                             Some(value) => value.clone(),
                             None => {
                                 ctx.error(format!("Missing parameter {}", #param_name));
-                                return Ok(runar_node::services::ServiceResponse {
-                                    status: 400,
-                                    data: None,
-                                    error: Some(format!("Missing parameter {}", #param_name)),
-                                });
+                                return Err(anyhow!(format!("Missing parameter {}", #param_name)));
                             }
                         }
                     },
                     Err(err) => {
                         ctx.error(format!("Failed to parse parameters as map with String values: {}", err));
-                        return Ok(runar_node::services::ServiceResponse {
-                            status: 400,
-                            data: None,
-                            error: Some(format!("Failed to parse parameters as map with String values: {}", err)),
-                        });
+                        return Err(anyhow!(format!("Failed to parse parameters as map with String values: {}", err)));
                     }
                 };
             }
@@ -431,21 +382,13 @@ fn generate_parameter_extractions(params: &[(Ident, Type)]) -> TokenStream2 {
                             Some(value) => *value,
                             None => {
                                 ctx.error(format!("Missing parameter {}", #param_name));
-                                return Ok(runar_node::services::ServiceResponse {
-                                    status: 400,
-                                    data: None,
-                                    error: Some(format!("Missing parameter {}", #param_name)),
-                                });
+                                return Err(anyhow!(format!("Missing parameter {}", #param_name)));
                             }
                         }
                     },
                     Err(err) => {
                         ctx.error(format!("Failed to parse parameters as map with bool values: {}", err));
-                        return Ok(runar_node::services::ServiceResponse {
-                            status: 400,
-                            data: None,
-                            error: Some(format!("Failed to parse parameters as map with bool values: {}", err)),
-                        });
+                        return Err(anyhow!(format!("Failed to parse parameters as map with bool values: {}", err)));
                     }
                 };
             }
@@ -460,31 +403,19 @@ fn generate_parameter_extractions(params: &[(Ident, Type)]) -> TokenStream2 {
                                     Ok(val) => val,
                                     Err(err) => {
                                         ctx.error(format!("Failed to parse parameter {}: {}", #param_name, err));
-                                        return Ok(runar_node::services::ServiceResponse {
-                                            status: 400,
-                                            data: None,
-                                            error: Some(format!("Failed to parse parameter {}: {}", #param_name, err)),
-                                        });
+                                        return Err(anyhow!(format!("Failed to parse parameter {}: {}", #param_name, err)));
                                     }
                                 }
                             },
                             None => {
                                 ctx.error(format!("Missing parameter {}", #param_name));
-                                return Ok(runar_node::services::ServiceResponse {
-                                    status: 400,
-                                    data: None,
-                                    error: Some(format!("Missing parameter {}", #param_name)),
-                                });
+                                return Err(anyhow!(format!("Missing parameter {}", #param_name)));
                             }
                         }
                     },
                     Err(err) => {
                         ctx.error(format!("Failed to parse parameters as map: {}", err));
-                        return Ok(runar_node::services::ServiceResponse {
-                            status: 400,
-                            data: None,
-                            error: Some(format!("Failed to parse parameters as map: {}", err)),
-                        });
+                        return Err(anyhow!(format!("Failed to parse parameters as map: {}", err)));
                     }
                 };
             }

@@ -88,12 +88,17 @@ pub fn subscribe_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
                     // Create a boxed future that returns Result<(), anyhow::Error>
                     let self_clone = self_clone.clone();
                     Box::pin(async move {
+                        
                         // Extract parameter from the event value
-                        let #param_ident = match value.clone().as_type::<#param_type>() {
-                            Ok(val) => val,
-                            Err(err) => {
-                                ctx.error(format!("Failed to parse event value as {}: {}", stringify!(#param_type), err));
-                                return Ok(());
+                        let #param_ident = match value {
+                            Some(value) => match value.clone().as_type::<#param_type>() {
+                                Ok(val) => val,
+                                Err(err) => {
+                                    return Err(anyhow!(format!("Failed to parse event value as {}: {}", stringify!(#param_type), err));
+                                }
+                            },
+                            None => {
+                                return Err(anyhow!(format!("Required event value is missing for {}", #path_value)));
                             }
                         };
                         
@@ -101,8 +106,7 @@ pub fn subscribe_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
                         match self_clone.#fn_ident(#param_ident, &ctx).await {
                             Ok(_) => Ok(()),
                             Err(err) => {
-                                ctx.error(format!("Error in event handler for {}: {}", #path_value, err));
-                                Ok(()) // Still return Ok to prevent subscription cancellation
+                                Err(anyhow!(format!("Error in event handler for {}: {}", #path_value, err))) 
                             }
                         }
                     })

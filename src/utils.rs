@@ -65,18 +65,12 @@ pub fn generate_param_extraction(
                 Ok(val) => val,
                 Err(_) => {
                     context.error(format!("Failed to parse parameter {} for action {}", #index, #action_name));
-                    return Ok(runar_node::services::ServiceResponse::error(
-                        400,
-                        &format!("Invalid parameter type for parameter {}", #index),
-                    ));
+                    return Err(anyhow!(format!("Invalid parameter type for parameter {}", #index)));
                 }
             },
             None => {
                 context.error(format!("Missing parameter {} for action {}", #index, #action_name));
-                return Ok(runar_node::services::ServiceResponse::error(
-                    400,
-                    &format!("Missing parameter {}", #index),
-                ));
+                return Err(anyhow!(format!("Missing parameter {} for action {}", #index, #action_name)));
             }
         };
     }
