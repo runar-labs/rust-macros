@@ -6,43 +6,43 @@
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{quote, format_ident};
-use syn::{
-    parse_macro_input, FnArg, Ident, ItemFn, Lit,
-    Pat, PatIdent, PatType, ReturnType, Type, punctuated::Punctuated,
-    token::Comma
-};
+use quote::{format_ident, quote};
 use syn::parse::Parser;
+use syn::{
+    parse_macro_input, punctuated::Punctuated, token::Comma, FnArg, Ident, ItemFn, Lit, Pat,
+    PatIdent, PatType, ReturnType, Type,
+};
 
 /// Implementation of the action macro
 pub fn action_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Parse the input as a function
     let input = parse_macro_input!(item as ItemFn);
-    
+
     // Default to function name
     let fn_name = input.sig.ident.to_string();
-    
+
     // Parse the attributes
     let mut action_name = fn_name.clone();
     let mut action_path = fn_name.clone();
-    
+
     if !attr.is_empty() {
         // Convert attribute tokens to a string for simple parsing
         let attr_str = attr.to_string();
-        
+
         // Extract attributes from the TokenStream
         if attr_str.contains("path") {
             // Try to parse as a name-value attribute
             // For safety, we're using a simple string parsing approach
             let attr_str = attr.to_string();
-            
+
             if attr_str.contains("path") && attr_str.contains('=') && attr_str.contains('"') {
                 // Find the path value
                 let start_idx = attr_str.find("path").unwrap() + 4; // Skip 'path'
                 let equals_idx = attr_str[start_idx..].find('=').unwrap() + start_idx + 1; // Skip '='
                 let quote_start_idx = attr_str[equals_idx..].find('"').unwrap() + equals_idx + 1; // Skip opening quote
-                let quote_end_idx = attr_str[quote_start_idx..].find('"').unwrap() + quote_start_idx;
-                
+                let quote_end_idx =
+                    attr_str[quote_start_idx..].find('"').unwrap() + quote_start_idx;
+
                 // Extract the path value
                 action_path = attr_str[quote_start_idx..quote_end_idx].to_string();
             }
@@ -60,13 +60,13 @@ pub fn action_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
     };
-    
+
     // Extract parameters from the function signature
     let params = extract_parameters(&input);
-    
+
     // Extract the return type information for proper handling
     let return_type_info = extract_return_type_info(&input.sig.output);
-    
+
     // Generate the register action method based on return type information
     let register_action_method = generate_register_action_method(
         &input.sig.ident,
@@ -78,15 +78,15 @@ pub fn action_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
         &return_type_info.type_name,
         &return_type_info.needs_registration,
     );
-    
+
     // Combine the original function with the generated register method
     let expanded = quote! {
-        
+
         #input
 
         #register_action_method
     };
-    
+
     expanded.into()
 }
 
@@ -102,16 +102,16 @@ fn extract_return_type_info(return_type: &ReturnType) -> ReturnTypeInfo {
         ReturnType::Type(_, ty) => {
             // Convert the type to a string for analysis
             let type_str = quote! { #ty }.to_string();
-            
+
             // Check if this is a Result type
             let is_result = type_str.contains("Result");
-            
+
             // Determine the actual return type (if it's Result<T, E>, extract T)
             let inner_type = if is_result {
                 // Try to extract the type parameter from Result<T, E>
                 if let Some(start) = type_str.find('<') {
                     if let Some(end) = type_str.find(',') {
-                        type_str[start+1..end].trim().to_string()
+                        type_str[start + 1..end].trim().to_string()
                     } else {
                         // Fallback if we can't parse the Result type
                         "unknown".to_string()
@@ -124,24 +124,23 @@ fn extract_return_type_info(return_type: &ReturnType) -> ReturnTypeInfo {
                 // Not a Result, use the whole type
                 type_str
             };
-            
+
             // Determine if this is a primitive type
-            let is_primitive = inner_type.contains("i32") || 
-                              inner_type.contains("i64") || 
-                              inner_type.contains("u32") || 
-                              inner_type.contains("u64") || 
-                              inner_type.contains("f32") || 
-                              inner_type.contains("f64") || 
-                              inner_type.contains("bool") || 
-                              inner_type.contains("String") || 
-                              inner_type.contains("&str") || 
-                              inner_type.contains("()");
-            
+            let is_primitive = inner_type.contains("i32")
+                || inner_type.contains("i64")
+                || inner_type.contains("u32")
+                || inner_type.contains("u64")
+                || inner_type.contains("f32")
+                || inner_type.contains("f64")
+                || inner_type.contains("bool")
+                || inner_type.contains("String")
+                || inner_type.contains("&str")
+                || inner_type.contains("()");
+
             // Determine if this type needs registration with the serializer
-            let needs_registration = !is_primitive && 
-                                    !inner_type.contains("Vec") && 
-                                    !inner_type.contains("HashMap");
-            
+            let needs_registration =
+                !is_primitive && !inner_type.contains("Vec") && !inner_type.contains("HashMap");
+
             ReturnTypeInfo {
                 is_result,
                 type_name: inner_type,
@@ -154,25 +153,26 @@ fn extract_return_type_info(return_type: &ReturnType) -> ReturnTypeInfo {
 
 /// Struct to hold information about the return type
 struct ReturnTypeInfo {
-    is_result: bool,        // Whether the return type is a Result
-    type_name: String,      // The name of the type (or inner type if Result)
-    is_primitive: bool,     // Whether it's a primitive type
+    is_result: bool,          // Whether the return type is a Result
+    type_name: String,        // The name of the type (or inner type if Result)
+    is_primitive: bool,       // Whether it's a primitive type
     needs_registration: bool, // Whether it needs registration with the serializer
 }
-
-
 
 /// Extract parameters from the function signature
 fn extract_parameters(input: &ItemFn) -> Vec<(Ident, Type)> {
     let mut params = Vec::new();
-    
+
     for arg in &input.sig.inputs {
         match arg {
             FnArg::Typed(PatType { pat, ty, .. }) => {
                 // Skip the context parameter
                 if let Pat::Ident(PatIdent { ident, .. }) = &**pat {
                     let ident_string = ident.to_string();
-                    if ident_string != "self" && ident_string != "ctx" && !ident_string.ends_with("ctx") {
+                    if ident_string != "self"
+                        && ident_string != "ctx"
+                        && !ident_string.ends_with("ctx")
+                    {
                         params.push((ident.clone(), (**ty).clone()));
                     }
                 }
@@ -180,7 +180,7 @@ fn extract_parameters(input: &ItemFn) -> Vec<(Ident, Type)> {
             _ => {}
         }
     }
-    
+
     params
 }
 
@@ -201,13 +201,13 @@ fn generate_register_action_method(
     } else {
         quote! { true }
     };
-    
+
     // Generate parameter extraction code
     let param_extractions = generate_parameter_extractions(params);
-    
+
     // Generate method call with extracted parameters
     let method_call = generate_method_call(fn_ident, params);
-    
+
     // Generate the appropriate result handling based on the return type
     let result_handling = if *is_primitive {
         quote! {
@@ -222,22 +222,22 @@ fn generate_register_action_method(
             Ok(Some(value_type))
         }
     };
-    
+
     // Generate a unique method name for the action registration
     let register_method_name = format_ident!("register_action_{}", fn_ident);
-    
+
     quote! {
         async fn #register_method_name(&self, context: &runar_node::services::LifecycleContext) -> anyhow::Result<()> {
             context.logger.info(format!("Registering '{}' action", #action_name));
-            
+
             // Create a clone of self that can be moved into the closure
             let self_clone = self.clone();
-            
+
             // Create the action handler as an Arc to match what the register_action expects
-            let handler = std::sync::Arc::new(move |params_opt: Option<runar_common::types::ArcValueType>, ctx: runar_node::services::RequestContext| 
+            let handler = std::sync::Arc::new(move |params_opt: Option<runar_common::types::ArcValueType>, ctx: runar_node::services::RequestContext|
                 -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<runar_common::types::ArcValueType>, anyhow::Error>> + Send>> {
                 let inner_self = self_clone.clone();
-                
+
                 Box::pin(async move {
                     // Extract parameters from the map if available
                     let mut params_value = match params_opt {
@@ -255,9 +255,9 @@ fn generate_register_action_method(
                             }
                         }
                     };
-                    
+
                     #param_extractions
-                    
+
                     // Call the actual method with the extracted parameters
                     match #method_call.await {
                         Ok(result) => {
@@ -271,14 +271,14 @@ fn generate_register_action_method(
                     }
                 })
             });
-            
+
             // If this action returns a type that needs registration with the serializer,
             // we would register it here
             if #needs_registration {
                 context.logger.debug(format!("Type registration needed for action '{}' with type: {}", #action_name, #type_name));
                 // The actual registration logic would depend on the service's serializer API
             }
-            
+
             // Register the action handler with the configured path
             context.register_action(
                 #action_path.to_string(),
@@ -291,11 +291,11 @@ fn generate_register_action_method(
 /// Generate parameter extraction code to exactly match the reference implementation
 fn generate_parameter_extractions(params: &[(Ident, Type)]) -> TokenStream2 {
     let mut extractions = TokenStream2::new();
-    
+
     for (param_ident, param_type) in params {
         let param_name = param_ident.to_string();
         let type_str = quote! { #param_type }.to_string();
-        
+
         // Extract parameters based on their type
         let extraction = if type_str.contains("f64") || type_str.contains("f32") {
             // Floating point extraction
@@ -420,10 +420,10 @@ fn generate_parameter_extractions(params: &[(Ident, Type)]) -> TokenStream2 {
                 };
             }
         };
-        
+
         extractions.extend(extraction);
     }
-    
+
     extractions
 }
 
@@ -432,7 +432,7 @@ fn generate_method_call(fn_ident: &Ident, params: &[(Ident, Type)]) -> TokenStre
     let param_idents = params.iter().map(|(ident, _)| {
         quote! { #ident }
     });
-    
+
     quote! {
         inner_self.#fn_ident(#(#param_idents,)* &ctx)
     }

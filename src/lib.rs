@@ -5,15 +5,15 @@
 extern crate proc_macro;
 
 mod action;
+mod publish;
 mod service;
 mod subscribe;
-mod publish;
 mod utils;
 
 use proc_macro::TokenStream;
 
 /// Service macro for implementing AbstractService
-/// 
+///
 /// This macro automatically implements the AbstractService trait for a struct
 /// and registers all methods marked with #[action] or #[subscribe].
 #[proc_macro_attribute]

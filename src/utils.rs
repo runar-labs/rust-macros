@@ -8,7 +8,10 @@ use quote::quote;
 use syn::{Attribute, Lit, Meta, Path};
 
 /// Extract a string value from an attribute
-pub fn extract_string_from_attribute(attrs: &[Attribute], path_segments: &[&str]) -> Option<String> {
+pub fn extract_string_from_attribute(
+    attrs: &[Attribute],
+    path_segments: &[&str],
+) -> Option<String> {
     for attr in attrs {
         if path_matches(&attr.path(), path_segments) {
             // Use parse_args instead of parse_meta, which is deprecated in syn 2.0

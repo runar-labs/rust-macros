@@ -6,9 +6,11 @@
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
-use quote::{quote, format_ident};
-use syn::{parse_macro_input, ItemFn, FnArg, Pat, PatIdent, PatType, Lit, LitStr, Expr, Type,
-    parse::Parse, parse::ParseStream, Token, Result, Meta, Ident};
+use quote::{format_ident, quote};
+use syn::{
+    parse::Parse, parse::ParseStream, parse_macro_input, Expr, FnArg, Ident, ItemFn, Lit, LitStr,
+    Meta, Pat, PatIdent, PatType, Result, Token, Type,
+};
 
 // Define a struct to parse the macro attributes
 pub struct SubscribeImpl {
@@ -36,18 +38,24 @@ impl Parse for SubscribeImpl {
             }
             return Err(input.error("Expected path=\"value\" or a string literal"));
         }
-        
+
         // Otherwise, try to parse as a string literal followed by a handler
         let path = input.parse::<LitStr>()?;
-        
+
         // Check if we have a handler
         if input.peek(Token![,]) {
             input.parse::<Token![,]>()?;
             let handler = input.parse::<Expr>()?;
-            Ok(SubscribeImpl { path, handler: Some(handler) })
+            Ok(SubscribeImpl {
+                path,
+                handler: Some(handler),
+            })
         } else {
             // Just a path string
-            Ok(SubscribeImpl { path, handler: None })
+            Ok(SubscribeImpl {
+                path,
+                handler: None,
+            })
         }
     }
 }
@@ -56,30 +64,30 @@ impl Parse for SubscribeImpl {
 pub fn subscribe_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Parse the input as a function
     let input = parse_macro_input!(item as ItemFn);
-    
+
     // Parse the attributes
     let subscribe_impl = parse_macro_input!(attr as SubscribeImpl);
     let path = &subscribe_impl.path;
     let path_value = &path.value();
-    
+
     // Get the function identifier
     let fn_ident = &input.sig.ident;
     let attrs = &input.attrs;
     let vis = &input.vis;
-    
+
     // Extract parameters from the function signature
     let params = extract_parameters(&input);
-    
+
     // Generate a unique method name for the subscription registration
     let register_method_name = format_ident!("register_subscription_{}", fn_ident);
-    
+
     // Generate the registration method based on parameters
     let register_method = if params.len() == 1 {
         let (param_ident, param_type) = &params[0];
         quote! {
             async fn #register_method_name(&self, context: &runar_node::services::LifecycleContext) -> anyhow::Result<()> {
                 context.info(format!("Subscribing to '{}' event", #path_value));
-                
+
                 // Create a clone of self that can be moved into the closure
                 let self_clone = self.clone();
 
@@ -88,7 +96,7 @@ pub fn subscribe_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
                     // Create a boxed future that returns Result<(), anyhow::Error>
                     let self_clone = self_clone.clone();
                     Box::pin(async move {
-                        
+
                         // Extract parameter from the event value
                         let #param_ident = match value {
                             Some(value) => match value.clone().as_type::<#param_type>() {
@@ -101,17 +109,17 @@ pub fn subscribe_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
                                 return Err(anyhow!(format!("Required event value is missing for {}", #path_value)));
                             }
                         };
-                        
+
                         // Call the handler method with the extracted parameter
                         match self_clone.#fn_ident(#param_ident, &ctx).await {
                             Ok(_) => Ok(()),
                             Err(err) => {
-                                Err(anyhow!(format!("Error in event handler for {}: {}", #path_value, err))) 
+                                Err(anyhow!(format!("Error in event handler for {}: {}", #path_value, err)))
                             }
                         }
                     })
                 })).await?;
-                
+
                 context.info(format!("Registered event handler for {}", #path_value));
                 Ok(())
             }
@@ -120,7 +128,7 @@ pub fn subscribe_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
         quote! {
             async fn #register_method_name(&self, context: &runar_node::services::LifecycleContext) -> anyhow::Result<()> {
                 context.info(format!("Subscribing to '{}' event", #path_value));
-                
+
                 // Create a clone of self that can be moved into the closure
                 let self_clone = self.clone();
 
@@ -139,7 +147,7 @@ pub fn subscribe_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
                         }
                     })
                 })).await?;
-                
+
                 context.info(format!("Registered event handler for {}", #path_value));
                 Ok(())
             }
@@ -150,31 +158,34 @@ pub fn subscribe_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
             compile_error!("Subscription handlers can only have one parameter plus context");
         }
     };
-    
+
     // Combine the original function with the generated register method
     let expanded = quote! {
         // Keep the original function
         #(#attrs)*
         #vis #input
-        
+
         // Add the registration method
         #register_method
     };
-    
+
     TokenStream::from(expanded)
 }
 
 /// Extract parameters from the function signature
 fn extract_parameters(input: &ItemFn) -> Vec<(Ident, Type)> {
     let mut params = Vec::new();
-    
+
     for arg in &input.sig.inputs {
         match arg {
             FnArg::Typed(PatType { pat, ty, .. }) => {
                 // Skip the self parameter and context parameter
                 if let Pat::Ident(PatIdent { ident, .. }) = &**pat {
                     let ident_string = ident.to_string();
-                    if ident_string != "self" && ident_string != "ctx" && !ident_string.ends_with("ctx") {
+                    if ident_string != "self"
+                        && ident_string != "ctx"
+                        && !ident_string.ends_with("ctx")
+                    {
                         params.push((ident.clone(), (**ty).clone()));
                     }
                 }
@@ -182,6 +193,6 @@ fn extract_parameters(input: &ItemFn) -> Vec<(Ident, Type)> {
             _ => {}
         }
     }
-    
+
     params
 }

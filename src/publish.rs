@@ -3,14 +3,16 @@
 // This module implements the publish macro, which automatically publishes
 // the result of an action to a specified topic.
 
-use proc_macro::TokenStream; 
+use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, ItemFn, Lit, LitStr, Expr,
-    parse::Parse, parse::ParseStream, Token, Result, Meta};
+use syn::{
+    parse::Parse, parse::ParseStream, parse_macro_input, Expr, ItemFn, Lit, LitStr, Meta, Result,
+    Token,
+};
 
 // Define a struct to parse the macro attributes
 pub struct PublishImpl {
-    pub path: LitStr, 
+    pub path: LitStr,
 }
 
 impl Parse for PublishImpl {
@@ -32,18 +34,18 @@ impl Parse for PublishImpl {
             }
             return Err(input.error("Expected path=\"value\" or a string literal"));
         }
-        
+
         // Otherwise, try to parse as a string literal followed by a handler
         let path = input.parse::<LitStr>()?;
-        
+
         // Check if we have a handler
         // if input.peek(Token![,]) {
         //     input.parse::<Token![,]>()?;
         //     let handler = input.parse::<Expr>()?;
         //     Ok(PublishImpl { path, handler: Some(handler) })
         // } else {
-            // Just a path string
-            Ok(PublishImpl { path  })
+        // Just a path string
+        Ok(PublishImpl { path })
         // }
     }
 }
@@ -52,21 +54,20 @@ impl Parse for PublishImpl {
 pub fn publish_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
     // Parse the input as a function
     let input = parse_macro_input!(item as ItemFn);
-    
+
     // Parse the attributes
     let publish_impl = parse_macro_input!(attr as PublishImpl);
     let path = &publish_impl.path;
-    
-    
+
     // Get the function body
     let attrs = &input.attrs;
     let vis = &input.vis;
     let sig = &input.sig;
     let block = &input.block;
-    
+
     // Check if the function is already async
     let is_async = input.sig.asyncness.is_some();
-    
+
     // Generate the modified function with publishing
     let expanded = if is_async {
         quote! {
@@ -74,7 +75,7 @@ pub fn publish_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
             #vis #sig {
                 // Execute the original function body
                 let result = #block;
-                
+
                 // If the result is Ok, publish it
                 if let Ok(ref action_result) = &result {
                     // Publish the result to the specified topic
@@ -85,7 +86,7 @@ pub fn publish_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
                         }
                     }
                 }
-                
+
                 // Return the original result
                 result
             }
@@ -96,7 +97,7 @@ pub fn publish_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
             #vis async #sig {
                 // Execute the original function body
                 let result = (|| #block)();
-                
+
                 // If the result is Ok, publish it
                 if let Ok(ref action_result) = &result {
                     // Publish the result to the specified topic
@@ -107,13 +108,12 @@ pub fn publish_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
                         }
                     }
                 }
-                
+
                 // Return the original result
                 result
             }
         }
     };
-    
+
     TokenStream::from(expanded)
 }
-
