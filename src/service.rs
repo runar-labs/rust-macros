@@ -305,10 +305,19 @@ fn generate_abstract_service_impl(struct_type: &Ident, all_methods: &[(Ident, &s
     // Create a string literal with all the types
     let types_str = sorted_types.join("\n");
     
-    // Generate code to log the types
+    // Create type identifiers for each type
+    let type_idents = sorted_types.iter()
+        .map(|t| {
+            // Parse the type string into a type path
+            let type_path = syn::parse_str::<syn::TypePath>(t)
+                .unwrap_or_else(|_| panic!("Failed to parse type: {}", t));
+            type_path
+        })
+        .collect::<Vec<_>>();
+    
+    // Generate the code to log the types
     let type_collection_code = quote! {
-        let types_string = #types_str;
-        context.info(format!("Types used by service {}:\n{}", stringify!(#struct_type), types_string));
+        context.info(format!("Types used by service {}:\n    {}", stringify!(#struct_type), #types_str));
     };
 
     quote! {
@@ -372,6 +381,12 @@ fn generate_abstract_service_impl(struct_type: &Ident, all_methods: &[(Ident, &s
                 
                 // Log all the collected types
                 #type_collection_code
+                
+                // Register each type with the serializer
+                #({
+                    context.debug(format!("Registering type: {}", stringify!(#type_idents)));
+                    serializer.register::<#type_idents>()?;
+                })*
                 
                 Ok(())
             }

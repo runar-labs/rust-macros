@@ -211,6 +211,8 @@ impl TestService {
 
 #[cfg(test)]
 mod tests {
+
+
     use super::*;
     use runar_node::config::LogLevel;
     use runar_node::config::LoggingConfig;
@@ -400,6 +402,31 @@ mod tests {
         } else {
             panic!("Expected 'age_changed' key in store, but it wasn't found");
         }
+        //make sure type were added properly to the serializer
+        let serializer = node.serializer.read().await;
+        let arc_value = ArcValueType::from_struct(my_data.clone());    
+        let bytes = serializer.serialize_value(&arc_value).unwrap();
+        
+        // Create an Arc<[u8]> directly from the Vec<u8>
+        let arc_bytes = Arc::from(bytes);
+        
+        let mut deserialized = serializer.deserialize_value(arc_bytes).unwrap();
+        let deserialized_my_data = deserialized.as_type::<MyData>().unwrap();
+
+        assert_eq!(deserialized_my_data, my_data);
+
+        //make sure type were added properly to the serializer
+        let user = User { id: 42, name: "John Doe".to_string(), email: "john.doe@example.com".to_string(), age: 30 };
+        let arc_value = ArcValueType::from_struct(user.clone());    
+        let bytes = serializer.serialize_value(&arc_value).unwrap();
+        
+        // Create an Arc<[u8]> directly from the Vec<u8>
+        let arc_bytes = Arc::from(bytes);
+        
+        let mut deserialized = serializer.deserialize_value(arc_bytes).unwrap();
+        let deserialized_user = deserialized.as_type::<User>().unwrap();
+
+        assert_eq!(deserialized_user, user);
 
     }
 }
