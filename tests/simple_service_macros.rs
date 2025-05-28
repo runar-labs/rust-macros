@@ -67,7 +67,7 @@ impl TestService {
         // Log using the context
         ctx.debug(format!("get_my_data id: {}", id));
 
-        let total_res = ctx.request("math/add", Some(ArcValueType::new_map(HashMap::from([("a_param".to_string(), 1000.0), ("b_param".to_string(), 500.0)])))).await?;
+        let total_res = ctx.request("math/add", Some(ArcValueType::new_map(HashMap::from([("a".to_string(), 1000.0), ("b".to_string(), 500.0)])))).await?;
         let mut data = total_res.unwrap();
         let total = data.as_type::<f64>()?;
 
@@ -161,50 +161,50 @@ impl TestService {
     // Define an action using the action macro
     #[publish(path="added")]
     #[action]
-    async fn add(&self, a_param: f64, b_param: f64, ctx: &RequestContext) -> Result<f64> {
+    async fn add(&self, a: f64, b: f64, ctx: &RequestContext) -> Result<f64> {
         // Log using the context
-        ctx.debug(format!("Adding {} + {}", a_param, b_param));
+        ctx.debug(format!("Adding {} + {}", a, b));
         // Return the result
-        Ok(a_param + b_param)
+        Ok(a + b)
     }
 
     // Define another action
     #[action]
-    async fn subtract(&self, a_param: f64, b_param: f64, ctx: &RequestContext) -> Result<f64> {
+    async fn subtract(&self, a: f64, b: f64, ctx: &RequestContext) -> Result<f64> {
         
         // Log using the context
-        ctx.debug(format!("Subtracting {} - {}", a_param, b_param));
+        ctx.debug(format!("Subtracting {} - {}", a, b));
 
         // Return the result
-        Ok(a_param - b_param)
+        Ok(a - b)
     }
 
     // Define an action with a custom name
     #[action("multiply_numbers")]
-    async fn multiply(&self, a_param: f64, b_param: f64, ctx: &RequestContext) -> Result<f64> {
+    async fn multiply(&self, a: f64, b: f64, ctx: &RequestContext) -> Result<f64> {
  
         // Log using the context
-        ctx.debug(format!("Multiplying {} * {}", a_param, b_param));
+        ctx.debug(format!("Multiplying {} * {}", a, b));
 
         // Return the result
-        Ok(a_param * b_param)
+        Ok(a * b)
     }
 
     // Define an action that can fail
     #[action]
-    async fn divide(&self, a_param: f64, b_param: f64, ctx: &RequestContext) -> Result<f64> {
+    async fn divide(&self, a: f64, b: f64, ctx: &RequestContext) -> Result<f64> {
  
         // Log using the context
-        ctx.debug(format!("Dividing {} / {}", a_param, b_param));
+        ctx.debug(format!("Dividing {} / {}", a, b));
 
         // Check for division by zero
-        if b_param == 0.0 {
+        if b == 0.0 {
             ctx.error("Division by zero".to_string());
             return Err(anyhow::anyhow!("Division by zero"));
         }
 
         // Return the result
-        Ok(a_param / b_param)
+        Ok(a / b)
     }
  
 }
@@ -245,8 +245,8 @@ mod tests {
 
         // Create parameters for the add action
         let mut map = std::collections::HashMap::new();
-        map.insert("a_param".to_string(), 10.0);
-        map.insert("b_param".to_string(), 5.0);
+        map.insert("a".to_string(), 10.0);
+        map.insert("b".to_string(), 5.0);
         let params = ArcValueType::new_map(map);
 
         // Call the add action
@@ -262,8 +262,8 @@ mod tests {
 
         // Make a request to the subtract action
         let mut map = std::collections::HashMap::new();
-        map.insert("a_param".to_string(), 10.0);
-        map.insert("b_param".to_string(), 5.0);
+        map.insert("a".to_string(), 10.0);
+        map.insert("b".to_string(), 5.0);
         let params = ArcValueType::new_map(map);
 
         let response = node.request("math/subtract", Some(params))
@@ -277,8 +277,8 @@ mod tests {
 
         // Make a request to the multiply action (with custom name)
         let mut map = std::collections::HashMap::new();
-        map.insert("a_param".to_string(), 5.0);
-        map.insert("b_param".to_string(), 3.0);
+        map.insert("a".to_string(), 5.0);
+        map.insert("b".to_string(), 3.0);
         let params = ArcValueType::new_map(map);
 
         let response = node.request("math/multiply_numbers", Some(params))
@@ -291,8 +291,8 @@ mod tests {
 
         // Make a request to the divide action with valid parameters
         let mut map = std::collections::HashMap::new();
-        map.insert("a_param".to_string(), 6.0);
-        map.insert("b_param".to_string(), 3.0);
+        map.insert("a".to_string(), 6.0);
+        map.insert("b".to_string(), 3.0);
         let params = ArcValueType::new_map(map);
 
         let response = node.request("math/divide", Some(params))
@@ -306,8 +306,8 @@ mod tests {
 
         // Make a request to the divide action with invalid parameters (division by zero)
         let mut map = std::collections::HashMap::new();
-        map.insert("a_param".to_string(), 6.0);
-        map.insert("b_param".to_string(), 0.0);
+        map.insert("a".to_string(), 6.0);
+        map.insert("b".to_string(), 0.0);
         let params = ArcValueType::new_map(map);
 
         let response = node.request("math/divide", Some(params))
