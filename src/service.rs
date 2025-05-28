@@ -158,7 +158,7 @@ fn generate_abstract_service_impl(struct_type: &Ident, all_methods: &[(Ident, &s
 
     quote! {
         #[async_trait::async_trait]
-        impl runar_node::AbstractService for #struct_type {
+        impl runar_node::services::abstract_service::AbstractService  for #struct_type {
             fn name(&self) -> &str {
                 SERVICE_NAME.get_or_init(|| {
                     #name_value.to_string()

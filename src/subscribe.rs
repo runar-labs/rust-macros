@@ -94,7 +94,7 @@ pub fn subscribe_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
                             Some(value) => match value.clone().as_type::<#param_type>() {
                                 Ok(val) => val,
                                 Err(err) => {
-                                    return Err(anyhow!(format!("Failed to parse event value as {}: {}", stringify!(#param_type), err));
+                                    return Err(anyhow!(format!("Failed to parse event value as {}: {}", stringify!(#param_type), err)));
                                 }
                             },
                             None => {
