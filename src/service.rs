@@ -380,6 +380,8 @@ fn generate_abstract_service_impl(
                 })
             }
 
+
+
             fn network_id(&self) -> Option<String> {
                 None
             }
@@ -406,8 +408,29 @@ fn generate_abstract_service_impl(
             }
         }
 
-        // Helper method to register complex types with the serializer
+        // Inherent setters for service metadata (available on the struct, not via trait)
         impl #struct_type {
+            /// Set the service name. Can only be set once per process (OnceLock).
+            pub fn set_name(&self, value: &str) {
+                let _ = SERVICE_NAME.set(value.to_string());
+            }
+
+            /// Set the service path. Can only be set once per process (OnceLock).
+            pub fn set_path(&self, value: &str) {
+                let _ = SERVICE_PATH.set(value.to_string());
+            }
+
+            /// Set the service description. Can only be set once per process (OnceLock).
+            pub fn set_description(&self, value: &str) {
+                let _ = SERVICE_DESCRIPTION.set(value.to_string());
+            }
+
+            /// Set the service version. Can only be set once per process (OnceLock).
+            pub fn set_version(&self, value: &str) {
+                let _ = SERVICE_VERSION.set(value.to_string());
+            }
+
+            // Helper method to register complex types with the serializer
             async fn register_types(context: &runar_node::services::LifecycleContext) -> anyhow::Result<()> {
                 // Acquire a write lock on the serializer
                 let mut serializer = context.serializer.write().await;

@@ -51,6 +51,14 @@ impl Clone for TestService {
     version = "0.0.1"
 )]
 impl TestService {
+    fn new(path: impl Into<String>, store: Arc<Mutex<HashMap<String, ArcValueType>>>) -> Self {
+        let instance = Self {
+            store: store.clone(),
+        };
+        instance.set_path(&path.into());
+        instance
+    }
+
     #[action]
     async fn get_user(&self, id: i32, ctx: &RequestContext) -> Result<User> {
         let user = User {
@@ -259,9 +267,7 @@ mod tests {
         let store = Arc::new(Mutex::new(HashMap::new()));
 
         // Create a test math service
-        let service = TestService {
-            store: store.clone(),
-        };
+        let service = TestService::new("math", store.clone());
 
         // Add the service to the node
         node.add_service(service).await.unwrap();
