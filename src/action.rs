@@ -90,8 +90,10 @@ pub fn action_macro(attr: TokenStream, item: TokenStream) -> TokenStream {
     expanded.into()
 }
 
-/// Extract information about the return type for proper handling
+/// Extract information about the return type for proper handling.
+/// This function robustly supports all valid Rust types, including nested generics.
 fn extract_return_type_info(return_type: &ReturnType) -> ReturnTypeInfo {
+    use syn::{Type, PathArguments, GenericArgument};
     match return_type {
         ReturnType::Default => ReturnTypeInfo {
             is_result: false,
@@ -100,56 +102,59 @@ fn extract_return_type_info(return_type: &ReturnType) -> ReturnTypeInfo {
             needs_registration: false,
         },
         ReturnType::Type(_, ty) => {
-            // Convert the type to a string for analysis
-            let type_str = quote! { #ty }.to_string();
-
-            // Check if this is a Result type
-            let is_result = type_str.contains("Result");
-
-            // Determine the actual return type (if it's Result<T, E>, extract T)
-            let inner_type = if is_result {
-                // Try to extract the type parameter from Result<T, E>
-                if let Some(start) = type_str.find('<') {
-                    if let Some(end) = type_str.find(',') {
-                        type_str[start + 1..end].trim().to_string()
-                    } else {
-                        // Fallback if we can't parse the Result type
-                        "unknown".to_string()
+            // Helper: recursively extract the first type parameter of Result<T, E>
+            fn extract_result_ok_type(ty: &Type) -> Option<&Type> {
+                if let Type::Path(type_path) = ty {
+                    let seg = type_path.path.segments.last()?;
+                    if seg.ident == "Result" {
+                        if let PathArguments::AngleBracketed(ref ab) = seg.arguments {
+                            // Find the first type argument (the Ok type)
+                            for arg in &ab.args {
+                                if let GenericArgument::Type(ref inner_ty) = arg {
+                                    return Some(inner_ty);
+                                }
+                            }
+                        }
                     }
-                } else {
-                    // Fallback if we can't parse the Result type
-                    "unknown".to_string()
                 }
+                None
+            }
+
+            let (is_result, inner_type_ast) = if let Some(ok_ty) = extract_result_ok_type(ty) {
+                (true, ok_ty)
             } else {
-                // Not a Result, use the whole type
-                type_str
+                (false, &**ty)
             };
 
+
+            let type_name = quote! { #inner_type_ast }.to_string();
+
             // Determine if this is a primitive type
-            let is_primitive = inner_type.contains("i32")
-                || inner_type.contains("i64")
-                || inner_type.contains("u32")
-                || inner_type.contains("u64")
-                || inner_type.contains("f32")
-                || inner_type.contains("f64")
-                || inner_type.contains("bool")
-                || inner_type.contains("String")
-                || inner_type.contains("&str")
-                || inner_type.contains("()");
+            let is_primitive = type_name.contains("i32")
+                || type_name.contains("i64")
+                || type_name.contains("u32")
+                || type_name.contains("u64")
+                || type_name.contains("f32")
+                || type_name.contains("f64")
+                || type_name.contains("bool")
+                || type_name.contains("String")
+                || type_name.contains("&str")
+                || type_name.contains("()");
 
             // Determine if this type needs registration with the serializer
             let needs_registration =
-                !is_primitive && !inner_type.contains("Vec") && !inner_type.contains("HashMap");
+                !is_primitive && !type_name.contains("Vec") && !type_name.contains("HashMap");
 
             ReturnTypeInfo {
                 is_result,
-                type_name: inner_type,
+                type_name,
                 is_primitive,
                 needs_registration,
             }
         }
     }
 }
+
 
 /// Struct to hold information about the return type
 struct ReturnTypeInfo {
@@ -291,6 +296,22 @@ fn generate_register_action_method(
 /// Generate parameter extraction code to exactly match the reference implementation
 fn generate_parameter_extractions(params: &[(Ident, Type)]) -> TokenStream2 {
     let mut extractions = TokenStream2::new();
+
+    // If there is only one parameter, deserialize the entire input into that type directly.
+    if params.len() == 1 {
+        let (param_ident, param_type) = &params[0];
+        extractions.extend(quote! {
+            // For single-parameter actions, deserialize the whole payload into the parameter type.
+            let #param_ident: #param_type = match params_value.as_type::<#param_type>() {
+                Ok(val) => val,
+                Err(err) => {
+                    ctx.error(format!("Failed to parse parameter for single-parameter action: {}", err));
+                    return Err(anyhow!(format!("Failed to parse parameter for single-parameter action: {}", err)));
+                }
+            };
+        });
+        return extractions;
+    }
 
     for (param_ident, param_type) in params {
         let param_name = param_ident.to_string();

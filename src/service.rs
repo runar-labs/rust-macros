@@ -143,54 +143,30 @@ fn extract_types_from_method(method: &ImplItemFn) -> Vec<String> {
 
     // Extract return type
     if let ReturnType::Type(_, ty) = &method.sig.output {
-        // Get the return type as a string
-        let return_type_str = quote! { #ty }.to_string();
-
-        // Clean up the string representation
-        let clean_return_type = return_type_str
-            .replace(" >", ">")
-            .replace("< ", "<")
-            .replace(" , ", ", ");
-
-        // Check if it's a Result type
-        if clean_return_type.starts_with("Result<") || clean_return_type.starts_with("Result <") {
-            // Extract the content between the first < and the last >
-            let start_idx = clean_return_type.find('<').unwrap_or(0) + 1;
-            let end_idx = clean_return_type
-                .rfind('>')
-                .unwrap_or(clean_return_type.len());
-
-            if start_idx < end_idx {
-                let inner_content = &clean_return_type[start_idx..end_idx];
-
-                // Split by the first comma to get the success type (T) and error type (E)
-                if let Some(comma_idx) = inner_content.find(',') {
-                    // Extract the success type (T)
-                    let success_type = inner_content[..comma_idx].trim().to_string();
-                    if !success_type.is_empty() && success_type != "()" {
-                        types.push(success_type);
-                    }
-
-                    // Extract the error type (E) if it's not a standard error type
-                    let error_type = inner_content[comma_idx + 1..].trim().to_string();
-                    if !error_type.is_empty()
-                        && error_type != "()"
-                        && error_type != "E"
-                        && !error_type.starts_with("anyhow::Error")
-                        && !error_type.starts_with("anyhow :: Error")
-                    {
-                        types.push(error_type);
+        // Use syn AST to extract Ok type from Result<T, E>
+        if let syn::Type::Path(type_path) = &**ty {
+            let seg = type_path.path.segments.last();
+            if let Some(seg) = seg {
+                if seg.ident == "Result" {
+                    if let syn::PathArguments::AngleBracketed(ref ab) = seg.arguments {
+                        // Find the first type argument (the Ok type)
+                        for arg in &ab.args {
+                            if let syn::GenericArgument::Type(ref inner_ty) = arg {
+                                let ok_type_str = quote! { #inner_ty }.to_string();
+                                types.push(ok_type_str);
+                                break;
+                            }
+                        }
                     }
                 } else {
-                    // If there's no comma, just add the whole inner content
-                    if !inner_content.is_empty() && inner_content != "()" {
-                        types.push(inner_content.to_string());
-                    }
+                    // Not a Result, just add the type directly
+                    let return_type_str = quote! { #ty }.to_string();
+                    types.push(return_type_str);
                 }
             }
         } else {
             // For non-Result types, just add the type directly
-            types.push(clean_return_type);
+            types.push(quote! { #ty }.to_string());
         }
     }
 
@@ -210,32 +186,11 @@ fn format_type_string(type_str: &str) -> Option<String> {
         formatted = formatted[2..].to_string();
     }
 
-    // Filter out standard types that don't need registration
+    // Only filter out direct primitive types; always register containers
     match formatted.as_str() {
         // Primitive types
         "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128"
         | "usize" | "f32" | "f64" | "bool" | "char" | "()" | "String" => None,
-
-        // Standard library types that are handled by default
-        s if s.starts_with("Vec<") && is_primitive_type(&s[4..s.len() - 1]) => None,
-        s if s.starts_with("Option<") && is_primitive_type(&s[7..s.len() - 1]) => None,
-        s if s.starts_with("HashMap<") => {
-            // Only return None if both key and value are primitive types
-            let inner = &s[8..s.len() - 1];
-            if let Some(comma_idx) = inner.find(',') {
-                let key_type = inner[..comma_idx].trim();
-                let value_type = inner[comma_idx + 1..].trim();
-                if is_primitive_type(key_type) && is_primitive_type(value_type) {
-                    None
-                } else {
-                    Some(formatted)
-                }
-            } else {
-                Some(formatted)
-            }
-        }
-
-        // Keep all other types
         _ => Some(formatted),
     }
 }
@@ -341,10 +296,10 @@ fn generate_abstract_service_impl(
     let type_idents = sorted_types
         .iter()
         .map(|t| {
-            // Parse the type string into a type path
-            let type_path = syn::parse_str::<syn::TypePath>(t)
+            // Use syn::Type to support all valid Rust types, including nested generics.
+            let type_ty = syn::parse_str::<syn::Type>(t)
                 .unwrap_or_else(|_| panic!("Failed to parse type: {}", t));
-            type_path
+            type_ty
         })
         .collect::<Vec<_>>();
 
@@ -441,6 +396,10 @@ fn generate_abstract_service_impl(
                 // Register each type with the serializer
                 #({
                     context.debug(format!("Registering type: {}", stringify!(#type_idents)));
+                })*
+                // Print all types being registered for macro transparency
+                context.debug(format!("All types registered: [{}]", [#(stringify!(#type_idents)),*].join(", ")));
+                #({
                     serializer.register::<#type_idents>()?;
                 })*
 

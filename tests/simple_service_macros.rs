@@ -60,6 +60,15 @@ impl TestService {
     }
 
     #[action]
+    async fn complex_data(
+        &self,
+        data: Vec<HashMap<String, String>>,
+        ctx: &RequestContext,
+    ) -> Result<Vec<HashMap<String, String>>> {
+        Ok(data)
+    }
+
+    #[action]
     async fn get_user(&self, id: i32, ctx: &RequestContext) -> Result<User> {
         let user = User {
             id,
@@ -338,10 +347,7 @@ mod tests {
             .contains("Division by zero"));
 
         // Make a request to the get_user action
-        let mut map = std::collections::HashMap::new();
-        map.insert("id".to_string(), 42);
-        let params = ArcValueType::new_map(map);
-
+        let params = ArcValueType::new_primitive(42);
         let response = node.request("math/get_user", Some(params)).await.unwrap();
 
         // Verify the response
@@ -350,20 +356,19 @@ mod tests {
         assert_eq!(user.name, "John Doe");
 
         // Make a request to the get_my_data action
-        let mut map = std::collections::HashMap::new();
-        map.insert("id".to_string(), 1);
-        let params = ArcValueType::new_map(map);
-
-        let response = node.request("math/my_data", Some(params)).await.unwrap();
+        let response = node
+            .request("math/my_data", Some(ArcValueType::new_primitive(100)))
+            .await
+            .unwrap();
 
         // Verify the response
         let my_data = response.unwrap().as_type::<MyData>().unwrap();
         assert_eq!(
             my_data,
             MyData {
-                id: 1,
+                id: 100,
                 text_field: "test".to_string(),
-                number_field: 1,
+                number_field: 100,
                 boolean_field: true,
                 float_field: 1500.0,
                 vector_field: vec![1, 2, 3],
@@ -468,5 +473,23 @@ mod tests {
         let deserialized_user = deserialized.as_type::<User>().unwrap();
 
         assert_eq!(deserialized_user, user);
+
+        let mut temp_map = HashMap::new();
+        temp_map.insert("key1".to_string(), "value1".to_string());
+        let param: Vec<HashMap<String, String>> = vec![temp_map];
+        let arc_value = ArcValueType::new_list(param);
+        // complex_data
+        let result = node
+            .request("math/complex_data", Some(arc_value))
+            .await
+            .unwrap();
+
+        let list_result = result
+            .unwrap()
+            .as_type::<Vec<HashMap<String, String>>>()
+            .unwrap();
+
+        assert_eq!(list_result.len(), 1);
+        assert_eq!(list_result[0].get("key1").unwrap(), "value1");
     }
 }
